@@ -49,7 +49,7 @@ def main(op, col):
     else:
         matrix = matrixLine(col,matrix1,matrix2)
     end = time.time()
-    print(f"First value of matrix : {matrix}")
+    print(f"First value of matrix : {matrix[0][0]}")
     print(f"Time elapsed in seconds : {end-start}")
     
 if __name__ == "__main__":

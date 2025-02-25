@@ -42,8 +42,8 @@ def main(op, col):
     else:
         matrix = matrixLine(col,matrix1,matrix2)
     end = time.time()
-    print(f"Time elapsed in seconds : {end-start}")
     print(f"First value of matrix : {matrix[0]}")
+    print(f"Time elapsed in seconds : {end-start}")
     
 if __name__ == "__main__":
     op = int(sys.argv[1])
