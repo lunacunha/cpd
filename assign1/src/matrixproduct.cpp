@@ -222,91 +222,59 @@ void init_papi() {
 }
 
 
-int main (int argc, char *argv[])
-{
+int main (int argc, char *argv[]) {
+	if (argc < 3) {
+		cerr << "Usage: " << argv[0] << " <matrix_size> <method> [block_size]" << endl;
+		return 1;
+	}
 
-	char c;
-	int lin, col, blockSize;
-	int op;
-	
+	int matrix_size = atoi(argv[1]);
+	string method = argv[2];
+	int block_size = (argc == 4) ? atoi(argv[3]) : 128;
+
 	int EventSet = PAPI_NULL;
-  	long long values[2];
-  	int ret;
-	
+	long long values[2];
+	int ret;
 
-	ret = PAPI_library_init( PAPI_VER_CURRENT );
-	if ( ret != PAPI_VER_CURRENT )
-		std::cout << "FAIL" << endl;
-
+	ret = PAPI_library_init(PAPI_VER_CURRENT);
+	if (ret != PAPI_VER_CURRENT) return 1;
 
 	ret = PAPI_create_eventset(&EventSet);
-		if (ret != PAPI_OK) cout << "ERROR: create eventset" << endl;
+	if (ret != PAPI_OK) return 1;
+	ret = PAPI_add_event(EventSet, PAPI_L1_DCM);
+	if (ret != PAPI_OK) return 1;
+	ret = PAPI_add_event(EventSet, PAPI_L2_DCM);
+	if (ret != PAPI_OK) return 1;
 
+	ret = PAPI_start(EventSet);
+	if (ret != PAPI_OK) return 1;
 
-	ret = PAPI_add_event(EventSet,PAPI_L1_DCM );
-	if (ret != PAPI_OK) cout << "ERROR: PAPI_L1_DCM" << endl;
+	SYSTEMTIME Time1 = clock();
 
+	if (method == "standard") {
+		OnMult(matrix_size, matrix_size);
+	} else if (method == "line") {
+		OnMultLine(matrix_size, matrix_size);
+	} else if (method == "block") {
+		OnMultBlock(matrix_size, matrix_size, block_size);
+	} else {
+		cerr << "Invalid method! Use 'standard', 'line', or 'block'." << endl;
+		return 1;
+	}
 
-	ret = PAPI_add_event(EventSet,PAPI_L2_DCM);
-	if (ret != PAPI_OK) cout << "ERROR: PAPI_L2_DCM" << endl;
+	SYSTEMTIME Time2 = clock();
+	double elapsedTime = (double)(Time2 - Time1) / CLOCKS_PER_SEC;
 
+	ret = PAPI_stop(EventSet, values);
+	if (ret != PAPI_OK) return 1;
 
-	op=1;
-	do {
-		cout << endl << "1. Multiplication" << endl;
-		cout << "2. Line Multiplication" << endl;
-		cout << "3. Block Multiplication" << endl;
-		cout << "Selection?: ";
-		cin >>op;
-		if (op == 0)
-			break;
-		printf("Dimensions: lins=cols ? ");
-   		cin >> lin;
-   		col = lin;
+	// Apenas imprime os valores necessários para os scripts Python
+	cout << elapsedTime << " " << values[0] << " " << values[1] << endl;
 
+	ret = PAPI_reset(EventSet);
+	ret = PAPI_remove_event(EventSet, PAPI_L1_DCM);
+	ret = PAPI_remove_event(EventSet, PAPI_L2_DCM);
+	ret = PAPI_destroy_eventset(&EventSet);
 
-		// Start counting
-		ret = PAPI_start(EventSet);
-		if (ret != PAPI_OK) cout << "ERROR: Start PAPI" << endl;
-
-		switch (op){
-			case 1: 
-				OnMult(lin, col);
-				break;
-			case 2:
-				OnMultLine(lin, col);  
-				break;
-			case 3:
-				cout << "Block Size? ";
-				cin >> blockSize;
-				OnMultBlock(lin, col, blockSize);  
-				break;
-
-		}
-
-  		ret = PAPI_stop(EventSet, values);
-  		if (ret != PAPI_OK) cout << "ERROR: Stop PAPI" << endl;
-  		printf("L1 DCM: %lld \n",values[0]);
-  		printf("L2 DCM: %lld \n",values[1]);
-
-		ret = PAPI_reset( EventSet );
-		if ( ret != PAPI_OK )
-			std::cout << "FAIL reset" << endl; 
-
-
-
-	}while (op != 0);
-
-	ret = PAPI_remove_event( EventSet, PAPI_L1_DCM );
-	if ( ret != PAPI_OK )
-		std::cout << "FAIL remove event" << endl; 
-
-	ret = PAPI_remove_event( EventSet, PAPI_L2_DCM );
-	if ( ret != PAPI_OK )
-		std::cout << "FAIL remove event" << endl; 
-
-	ret = PAPI_destroy_eventset( &EventSet );
-	if ( ret != PAPI_OK )
-		std::cout << "FAIL destroy" << endl;
-
+	return 0;
 }
