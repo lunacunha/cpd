@@ -2,10 +2,10 @@ import subprocess
 import csv
 
 EXECUTABLE = "./matrixproduct"
-MULT_TYPES = {"standard": "standard_mult", "line": "line_mult", "block": "block_mult"}
-MATRIX_SIZES = [600, 1000, 1400, 1800, 2200, 2600, 3000]
+MULT_TYPES = {"block": "block_mult"}
+MATRIX_SIZES = [6144, 8192, 10240] #600, 1000, 1400, 1800, 2200, 2600, 3000, 4096
 BLOCK_SIZES = [128, 256, 512]  # Apenas para multiplicação por blocos
-RUNS = 20
+RUNS = 2
 
 for mult_type, filename in MULT_TYPES.items():
     for size in MATRIX_SIZES:
@@ -13,11 +13,14 @@ for mult_type, filename in MULT_TYPES.items():
 
         with open(output_filename, mode='w', newline='') as file:
             writer = csv.writer(file)
-            writer.writerow(["Run", "Time (s)", "L1 DCM", "L2 DCM"])
-
-        for i in range(1, RUNS + 1):
             if mult_type == "block":
-                for block in BLOCK_SIZES:
+                writer.writerow(["Run", "Block Size", "Time (s)", "L1 DCM", "L2 DCM"])
+            else:
+                writer.writerow(["Run", "Time (s)", "L1 DCM", "L2 DCM"])
+
+        if mult_type == "block":
+            for block in BLOCK_SIZES:
+                for i in range(1, RUNS + 1):
                     process = subprocess.run(
                         [EXECUTABLE, str(size), mult_type, str(block)],
                         capture_output=True, text=True
@@ -31,10 +34,12 @@ for mult_type, filename in MULT_TYPES.items():
                     else:
                         time_value = l1_dcm_value = l2_dcm_value = "N/A"
 
-                    with open(f"{filename}_{size}_block_{block}.csv", mode='a', newline='') as file:
+                    with open(output_filename, mode='a', newline='') as file:
                         writer = csv.writer(file)
-                        writer.writerow([i, time_value, l1_dcm_value, l2_dcm_value])
-            else:
+                        writer.writerow([i, block, time_value, l1_dcm_value, l2_dcm_value])
+
+        else:  # Para "standard" e "line"
+            for i in range(1, RUNS + 1):
                 process = subprocess.run(
                     [EXECUTABLE, str(size), mult_type],
                     capture_output=True, text=True
