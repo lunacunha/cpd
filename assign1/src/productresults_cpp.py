@@ -2,10 +2,10 @@ import subprocess
 import csv
 
 EXECUTABLE = "./matrixproduct"
-MULT_TYPES = {"block": "block_mult"}
-MATRIX_SIZES = [8192, 10240] #600, 1000, 1400, 1800, 2200, 2600, 3000, 4096, 6144
+MULT_TYPES = {"standard": "standard_mult_py", "line": "line_mult_py", "block": "block_mult"}
+MATRIX_SIZES = [600, 1000, 1400, 1800, 2200, 2600, 3000, 4096, 6144, 8192, 10240]
 BLOCK_SIZES = [128, 256, 512]  # Apenas para multiplicação por blocos
-RUNS = 10
+RUNS = 1
 
 for mult_type, filename in MULT_TYPES.items():
     for size in MATRIX_SIZES:
@@ -14,9 +14,9 @@ for mult_type, filename in MULT_TYPES.items():
         with open(output_filename, mode='w', newline='') as file:
             writer = csv.writer(file)
             if mult_type == "block":
-                writer.writerow(["Run", "Block Size", "Time (s)", "L1 DCM", "L2 DCM"])
+                writer.writerow(["Run", "Block Size", "Time (s)", "L1 DCM", "L2 DCM", "L3 DCM"])
             else:
-                writer.writerow(["Run", "Time (s)", "L1 DCM", "L2 DCM"])
+                writer.writerow(["Run", "Time (s)", "L1 DCM", "L2 DCM", "L3 DCM"])
 
         if mult_type == "block":
             for block in BLOCK_SIZES:
@@ -26,18 +26,23 @@ for mult_type, filename in MULT_TYPES.items():
                         capture_output=True, text=True
                     )
 
+                    # Procura a linha que contenha exatamente 4 tokens (os números)
                     output_lines = process.stdout.strip().split("\n")
-                    values = output_lines[-1].split()  # Pega apenas a última linha com números
+                    metrics_line = None
+                    for line in reversed(output_lines):
+                        tokens = line.strip().split()
+                        if len(tokens) == 4:
+                            metrics_line = tokens
+                            break
 
-                    if len(values) == 3:
-                        time_value, l1_dcm_value, l2_dcm_value = values
+                    if metrics_line:
+                        time_value, l1_dcm_value, l2_dcm_value, l3_dcm_value = metrics_line
                     else:
-                        time_value = l1_dcm_value = l2_dcm_value = "N/A"
+                        time_value = l1_dcm_value = l2_dcm_value = l3_dcm_value = "N/A"
 
                     with open(output_filename, mode='a', newline='') as file:
                         writer = csv.writer(file)
-                        writer.writerow([i, block, time_value, l1_dcm_value, l2_dcm_value])
-
+                        writer.writerow([i, block, time_value, l1_dcm_value, l2_dcm_value, l3_dcm_value])
         else:  # Para "standard" e "line"
             for i in range(1, RUNS + 1):
                 process = subprocess.run(
@@ -46,13 +51,18 @@ for mult_type, filename in MULT_TYPES.items():
                 )
 
                 output_lines = process.stdout.strip().split("\n")
-                values = output_lines[-1].split()  # Pega apenas a última linha com números
+                metrics_line = None
+                for line in reversed(output_lines):
+                    tokens = line.strip().split()
+                    if len(tokens) == 4:
+                        metrics_line = tokens
+                        break
 
-                if len(values) == 3:
-                    time_value, l1_dcm_value, l2_dcm_value = values
+                if metrics_line:
+                    time_value, l1_dcm_value, l2_dcm_value, l3_dcm_value = metrics_line
                 else:
-                    time_value = l1_dcm_value = l2_dcm_value = "N/A"
+                    time_value = l1_dcm_value = l2_dcm_value = l3_dcm_value = "N/A"
 
                 with open(output_filename, mode='a', newline='') as file:
                     writer = csv.writer(file)
-                    writer.writerow([i, time_value, l1_dcm_value, l2_dcm_value])
+                    writer.writerow([i, time_value, l1_dcm_value, l2_dcm_value, l3_dcm_value])
