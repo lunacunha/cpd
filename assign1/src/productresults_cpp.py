@@ -3,9 +3,9 @@ import csv
 
 EXECUTABLE = "./matrixproduct"
 MULT_TYPES = {"block": "block_mult"}
-MATRIX_SIZES = [6144, 8192, 10240] #600, 1000, 1400, 1800, 2200, 2600, 3000, 4096
+MATRIX_SIZES = [8192, 10240] #600, 1000, 1400, 1800, 2200, 2600, 3000, 4096, 6144
 BLOCK_SIZES = [128, 256, 512]  # Apenas para multiplicação por blocos
-RUNS = 2
+RUNS = 10
 
 for mult_type, filename in MULT_TYPES.items():
     for size in MATRIX_SIZES:

@@ -9,21 +9,24 @@ EXECUTABLES = {
 
 # Tipos de multiplicação e nomes desejados nos arquivos
 MULT_TYPES = {"standard": "standard_mult_py", "line": "line_mult_py"}
-MATRIX_SIZES = [600, 1000, 1400, 1800, 2200, 2600, 3000]
-RUNS = 2
+MATRIX_SIZES = [2600, 3000]
+RUNS = 1
 
 for executable, exec_name in EXECUTABLES.items():
-    for mult_name, filename_prefix in MULT_TYPES.items():
-        output_filename = f"{filename_prefix}_results_{exec_name}.csv"
+    # Define a dimensão com base no nome do executável: "1d" ou "2d"
+    dimension = "1d" if exec_name == "matrixproduct" else "2d"
 
-        # Criar arquivo CSV e adicionar cabeçalho correto
+    for mult_name, filename_prefix in MULT_TYPES.items():
+        output_filename = f"{filename_prefix}results{exec_name}.csv"
+
+        # Cria o arquivo CSV e adiciona o cabeçalho com as colunas desejadas
         with open(output_filename, mode='w', newline='') as file:
             writer = csv.writer(file)
-            writer.writerow(["Run", "Time (s)"])  # Apenas tempo agora
+            writer.writerow(["Run", "Dimension", "Size", "Time(s)"])
 
         for size in MATRIX_SIZES:
             for run in range(1, RUNS + 1):
-                # Executa o script Python passando "standard" ou "line" como argumento
+                # Executa o script Python passando "standard" ou "line" como argumento e o tamanho da matriz
                 process = subprocess.run(
                     ["python3", executable, mult_name, str(size)],
                     capture_output=True, text=True
@@ -31,14 +34,11 @@ for executable, exec_name in EXECUTABLES.items():
 
                 output_lines = process.stdout.strip().split("\n")
 
-
-
-                # Extrai tempo de execução corretamente
+                # Extrai o tempo de execução a partir da linha que contém "Time elapsed in seconds"
                 time_line = next((line for line in output_lines if "Time elapsed in seconds" in line), None)
                 time_value = time_line.split(":")[1].strip() if time_line else "N/A"
 
-                # Escreve os resultados no CSV
+                # Escreve os resultados no CSV, incluindo run, dimensão, tamanho e tempo
                 with open(output_filename, mode='a', newline='') as file:
                     writer = csv.writer(file)
-                    writer.writerow([run, time_value])
-
+                    writer.writerow([run, dimension, size, time_value])
