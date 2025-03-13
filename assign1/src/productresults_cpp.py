@@ -14,9 +14,9 @@ for mult_type, filename in MULT_TYPES.items():
         with open(output_filename, mode='w', newline='') as file:
             writer = csv.writer(file)
             if mult_type == "block":
-                writer.writerow(["Run", "Block Size", "Time (s)", "L1 DCM", "L2 DCM", "L3 DCM"])
+                writer.writerow(["Run", "Block Size", "Time (s)", "L1 DCM", "L2 DCM", "L3 TCM"])
             else:
-                writer.writerow(["Run", "Time (s)", "L1 DCM", "L2 DCM", "L3 DCM"])
+                writer.writerow(["Run", "Time (s)", "L1 DCM", "L2 DCM", "L3 TCM"])
 
         if mult_type == "block":
             for block in BLOCK_SIZES:
@@ -36,13 +36,13 @@ for mult_type, filename in MULT_TYPES.items():
                             break
 
                     if metrics_line:
-                        time_value, l1_dcm_value, l2_dcm_value, l3_dcm_value = metrics_line
+                        time_value, l1_dcm_value, l2_dcm_value, l3_tcm_value = metrics_line
                     else:
-                        time_value = l1_dcm_value = l2_dcm_value = l3_dcm_value = "N/A"
+                        time_value = l1_dcm_value = l2_dcm_value = l3_tcm_value = "N/A"
 
                     with open(output_filename, mode='a', newline='') as file:
                         writer = csv.writer(file)
-                        writer.writerow([i, block, time_value, l1_dcm_value, l2_dcm_value, l3_dcm_value])
+                        writer.writerow([i, block, time_value, l1_dcm_value, l2_dcm_value, l3_tcm_value])
         else:  # Para "standard" e "line"
             for i in range(1, RUNS + 1):
                 process = subprocess.run(
@@ -59,10 +59,10 @@ for mult_type, filename in MULT_TYPES.items():
                         break
 
                 if metrics_line:
-                    time_value, l1_dcm_value, l2_dcm_value, l3_dcm_value = metrics_line
+                    time_value, l1_dcm_value, l2_dcm_value, l3_tcm_value = metrics_line
                 else:
-                    time_value = l1_dcm_value = l2_dcm_value = l3_dcm_value = "N/A"
+                    time_value = l1_dcm_value = l2_dcm_value = l3_tcm_value = "N/A"
 
                 with open(output_filename, mode='a', newline='') as file:
                     writer = csv.writer(file)
-                    writer.writerow([i, time_value, l1_dcm_value, l2_dcm_value, l3_dcm_value])
+                    writer.writerow([i, time_value, l1_dcm_value, l2_dcm_value, l3_tcm_value])

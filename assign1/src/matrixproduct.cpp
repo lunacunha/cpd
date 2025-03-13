@@ -283,61 +283,82 @@ void init_papi() {
 
 
 int main (int argc, char *argv[]) {
-	if (argc < 3) {
-		cerr << "Usage: " << argv[0] << " <matrix_size> <method> [block_size]" << endl;
-		return 1;
-	}
+    if (argc < 3) {
+        cerr << "Usage: " << argv[0] << " <matrix_size> <method> [block_size]" << endl;
+        return 1;
+    }
 
-	int matrix_size = atoi(argv[1]);
-	string method = argv[2];
-	int block_size = (argc == 4) ? atoi(argv[3]) : 128;
+    int matrix_size = atoi(argv[1]);
+    string method = argv[2];
+    int block_size = (argc == 4) ? atoi(argv[3]) : 128;
 
-	int EventSet = PAPI_NULL;
-	long long values[3];
-	int ret;
+    int EventSet = PAPI_NULL;
+    long long values[3];
+    int ret;
 
-	ret = PAPI_library_init(PAPI_VER_CURRENT);
-	if (ret != PAPI_VER_CURRENT) return 1;
+    ret = PAPI_library_init(PAPI_VER_CURRENT);
+    if (ret != PAPI_VER_CURRENT) {
+        cerr << "PAPI library initialization error" << endl;
+        return 1;
+    }
 
-	ret = PAPI_create_eventset(&EventSet);
-	if (ret != PAPI_OK) return 1;
-	ret = PAPI_add_event(EventSet, PAPI_L1_DCM);
-	if (ret != PAPI_OK) return 1;
-	ret = PAPI_add_event(EventSet, PAPI_L2_DCM);
-	if (ret != PAPI_OK) return 1;
-	ret = PAPI_add_event(EventSet, PAPI_L3_DCM);
-	if (ret != PAPI_OK) return 1;
+    ret = PAPI_create_eventset(&EventSet);
+    if (ret != PAPI_OK) {
+        cerr << "PAPI create event set error" << endl;
+        return 1;
+    }
+    ret = PAPI_add_event(EventSet, PAPI_L1_DCM);
+    if (ret != PAPI_OK) {
+        cerr << "PAPI add event L1_DCM error" << endl;
+        return 1;
+    }
+    ret = PAPI_add_event(EventSet, PAPI_L2_DCM);
+    if (ret != PAPI_OK) {
+        cerr << "PAPI add event L2_DCM error" << endl;
+        return 1;
+    }
+    ret = PAPI_add_event(EventSet, PAPI_L3_TCM);
+    if (ret != PAPI_OK) {
+        cerr << "PAPI add event L3_TCM error" << endl;
+        return 1;
+    }
 
-	ret = PAPI_start(EventSet);
-	if (ret != PAPI_OK) return 1;
+    ret = PAPI_start(EventSet);
+    if (ret != PAPI_OK) {
+        cerr << "PAPI start error" << endl;
+        return 1;
+    }
 
-	SYSTEMTIME Time1 = clock();
+    SYSTEMTIME Time1 = clock();
 
-	if (method == "standard") {
-		OnMult(matrix_size, matrix_size);
-	} else if (method == "line") {
-		OnMultLine(matrix_size, matrix_size);
-	} else if (method == "block") {
-		OnMultBlock(matrix_size, matrix_size, block_size);
-	} else {
-		cerr << "Invalid method! Use 'standard', 'line', or 'block'." << endl;
-		return 1;
-	}
+    if (method == "standard") {
+        OnMult(matrix_size, matrix_size);
+    } else if (method == "line") {
+        OnMultLine(matrix_size, matrix_size);
+    } else if (method == "block") {
+        OnMultBlock(matrix_size, matrix_size, block_size);
+    } else {
+        cerr << "Invalid method! Use 'standard', 'line', or 'block'." << endl;
+        return 1;
+    }
 
-	SYSTEMTIME Time2 = clock();
-	double elapsedTime = (double)(Time2 - Time1) / CLOCKS_PER_SEC;
+    SYSTEMTIME Time2 = clock();
+    double elapsedTime = (double)(Time2 - Time1) / CLOCKS_PER_SEC;
 
-	ret = PAPI_stop(EventSet, values);
-	if (ret != PAPI_OK) return 1;
+    ret = PAPI_stop(EventSet, values);
+    if (ret != PAPI_OK) {
+        cerr << "PAPI stop error" << endl;
+        return 1;
+    }
 
-	// Apenas imprime os valores necessários para os scripts Python
-	cout << elapsedTime << " " << values[0] << " " << values[1] << " " << values[2] << " " << values[3]<< endl;
+    // Apenas imprime os valores necessários para o script Python na saída padrão (stdout)
+    cout << elapsedTime << " " << values[0] << " " << values[1] << " " << values[2] << endl;
 
-	ret = PAPI_reset(EventSet);
-	ret = PAPI_remove_event(EventSet, PAPI_L1_DCM);
-	ret = PAPI_remove_event(EventSet, PAPI_L2_DCM);
-	ret = PAPI_remove_event(EventSet, PAPI_L3_DCM);
-	ret = PAPI_destroy_eventset(&EventSet);
+    ret = PAPI_reset(EventSet);
+    ret = PAPI_remove_event(EventSet, PAPI_L1_DCM);
+    ret = PAPI_remove_event(EventSet, PAPI_L2_DCM);
+    ret = PAPI_remove_event(EventSet, PAPI_L3_TCM);
+    ret = PAPI_destroy_eventset(&EventSet);
 
-	return 0;
+    return 0;
 }
