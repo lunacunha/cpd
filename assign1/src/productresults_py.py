@@ -9,7 +9,7 @@ EXECUTABLES = {
 
 # Tipos de multiplicação e nomes desejados nos arquivos
 MULT_TYPES = {"standard": "standard_mult_py", "line": "line_mult_py"}
-MATRIX_SIZES = [2600, 3000]
+MATRIX_SIZES = [600, 1000, 1400, 1800, 2200, 2600, 3000]
 RUNS = 1
 
 for executable, exec_name in EXECUTABLES.items():

@@ -2,9 +2,9 @@ import subprocess
 import csv
 
 EXECUTABLE = "./matrixproduct"
-MULT_TYPES = {"standard": "standard_mult_py", "line": "line_mult_py", "block": "block_mult"}
-MATRIX_SIZES = [600, 1000, 1400, 1800, 2200, 2600, 3000, 4096, 6144, 8192, 10240]
-BLOCK_SIZES = [128, 256, 512]  # Apenas para multiplicação por blocos
+MULT_TYPES = {"block": "block_mult"} #"standard": "standard_mult_py", "line": "line_mult_py",
+MATRIX_SIZES = [10240] #600, 1000, 1400, 1800, 2200, 2600, 3000, 4096, 6144, 8192,
+BLOCK_SIZES = [256, 512]  # 128 Apenas para multiplicação por blocos
 RUNS = 1
 
 for mult_type, filename in MULT_TYPES.items():
