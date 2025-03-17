@@ -4,6 +4,7 @@
 #include <time.h>
 #include <cstdlib>
 #include <papi.h>
+#include <omp.h>
 
 using namespace std;
 
@@ -13,7 +14,7 @@ using namespace std;
 void OnMult(int m_ar, int m_br) 
 {
 	
-	SYSTEMTIME Time1, Time2;
+	double Time1, Time2;
 	
 	char st[100];
 	double temp;
@@ -156,14 +157,13 @@ void OnMultLineParallel(int m_ar, int m_br)
 		for(j=0; j<m_ar; j++)
 			phc[i*m_ar + j] = (double)0.0;
 
-	Time1 = clock();
+	Time1 = omp_get_wtime();
 
-#pragma omp parallel
+#pragma omp parallel for private(k, j)
 	for (i = 0; i < m_ar; i++) {
 		// k goes through the elements of the matrix A
 		for (k = 0; k < m_ar; k++) {
 			double elementA_i_k = pha[i * m_ar + k]; // element A[i,k]
-#pragma omp for
 			for (j = 0; j < m_br; j++) {
 				// multiplies by the corresponding line in B
 				phc[i * m_br + j] += elementA_i_k * phb[k * m_br + j];
@@ -171,7 +171,7 @@ void OnMultLineParallel(int m_ar, int m_br)
 		}
 	}
 
-	Time2 = clock();
+	Time2 = omp_get_wtime();
 	sprintf(st, "Time: %3.3f seconds\n", (double)(Time2 - Time1) / CLOCKS_PER_SEC);
 	cout << st;
 
@@ -329,12 +329,14 @@ int main (int argc, char *argv[]) {
         return 1;
     }
 
-    SYSTEMTIME Time1 = clock();
+    double Time1 = omp_get_wtime();
 
     if (method == "standard") {
         OnMult(matrix_size, matrix_size);
     } else if (method == "line") {
         OnMultLine(matrix_size, matrix_size);
+    } else if (method == "parallel") {
+        OnMultLineParallel(matrix_size, matrix_size);
     } else if (method == "block") {
         OnMultBlock(matrix_size, matrix_size, block_size);
     } else {
@@ -342,8 +344,8 @@ int main (int argc, char *argv[]) {
         return 1;
     }
 
-    SYSTEMTIME Time2 = clock();
-    double elapsedTime = (double)(Time2 - Time1) / CLOCKS_PER_SEC;
+    double Time2 = omp_get_wtime();
+    double elapsedTime = (Time2 - Time1);
 
     ret = PAPI_stop(EventSet, values);
     if (ret != PAPI_OK) {
