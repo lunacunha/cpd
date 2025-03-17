@@ -216,7 +216,7 @@ void OnMultLineParallel2(int m_ar, int m_br)
 
 	Time1 = omp_get_wtime();
 
-#pragma omp parallel for private(i, j)
+    #pragma omp parallel for private(i, j)
 	for (i = 0; i < m_ar; i++) {
 		// k goes through the elements of the matrix A
 		for (k = 0; k < m_ar; k++) {

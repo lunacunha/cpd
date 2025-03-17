@@ -3,7 +3,7 @@ import csv
 
 EXECUTABLE = "./matrixproduct"
 MULT_TYPES = {"parallel2": "parallel_line_mult"} #"standard": "standard_mult", "line": "line_mult_py","parallel1", "parallel2", "block": "block_mult"
-MATRIX_SIZES = [1800] #600, 1000, 1400, 1800, 2200, 2600, 3000, 4096, 6144, 8192, 10240
+MATRIX_SIZES = [2600] #600, 1000, 1400, 1800, 2200, 2600, 3000, 4096, 6144, 8192, 10240
 BLOCK_SIZES = [256, 512]  # 128 Apenas para multiplicação por blocos
 RUNS = 10
 
