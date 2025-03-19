@@ -216,12 +216,12 @@ void OnMultLineParallel2(int m_ar, int m_br)
 
 	Time1 = omp_get_wtime();
 
-    #pragma omp parallel for private(i, j)
+    #pragma omp parallel private(i, k)
 	for (i = 0; i < m_ar; i++) {
 		// k goes through the elements of the matrix A
 		for (k = 0; k < m_ar; k++) {
 			double elementA_i_k = pha[i * m_ar + k]; // element A[i,k]7
-            #pragma omp parallel for private(k)
+			# pragma omp for
 			for (j = 0; j < m_br; j++) {
 				// multiplies by the corresponding line in B
 				phc[i * m_br + j] += elementA_i_k * phb[k * m_br + j];
