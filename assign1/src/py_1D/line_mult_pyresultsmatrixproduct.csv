@@ -10,9 +10,10 @@ Run,Dimension,Size,Time(s)
 9,1d,600,29.8134503364563
 10,1d,600,30.607351541519165
 
-Dimension,Size,Average Time(s)
+Dimension,Size,Avg Time
 1d,600,30.066869
 
+Run,Dimension,Size,Time(s)
 1,1d,1000,139.70723462104797
 2,1d,1000,138.80406022071838
 3,1d,1000,139.55104112625122
@@ -24,9 +25,10 @@ Dimension,Size,Average Time(s)
 9,1d,1000,138.201984167099
 10,1d,1000,138.08422946929932
 
-Dimension,Size,Average Time(s)
+Dimension,Size,Avg Time
 1d,1000,138.756530
 
+Run,Dimension,Size,Time(s)
 1,1d,1400,379.833701133728
 2,1d,1400,381.8284685611725
 3,1d,1400,381.03689765930176
@@ -38,9 +40,10 @@ Dimension,Size,Average Time(s)
 9,1d,1400,380.68380546569824
 10,1d,1400,382.3726165294647
 
-Dimension,Size,Average Time(s)
+Dimension,Size,Avg Time
 1d,1400,381.500102
 
+Run,Dimension,Size,Time(s)
 1,1d,1800,813.546148777008
 2,1d,1800,814.490639925003
 3,1d,1800,814.969384431839
@@ -52,7 +55,8 @@ Dimension,Size,Average Time(s)
 9,1d,1800,820.5729496479034
 10,1d,1800,811.8331670761108
 
-Dimension,Size,Average Time(s)
+Dimension,Size,Avg Time
 1d,1800,813.082467
 
+Run,Size,Size,Time(s)
 1,1d,2200,1480.764778137207

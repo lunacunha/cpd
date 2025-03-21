@@ -10,9 +10,10 @@ Run,Dimension,Size,Time(s)
 9,2d,600,0.030475378036499023
 10,2d,600,0.030634641647338867
 
-Dimension,Size,Average Time(s)
+Dimension,Size,Avg Time
 2d,600,0.030578
 
+Run,Dimension,Size,Time(s)
 1,2d,1000,0.08528256416320801
 2,2d,1000,0.08525800704956055
 3,2d,1000,0.0851888656616211
@@ -24,9 +25,10 @@ Dimension,Size,Average Time(s)
 9,2d,1000,0.08534765243530273
 10,2d,1000,0.08580398559570312
 
-Dimension,Size,Average Time(s)
+Dimension,Size,Avg Time
 2d,1000,0.085587
 
+Run,Dimension,Size,Time(s)
 1,2d,1400,0.16776680946350098
 2,2d,1400,0.16758084297180176
 3,2d,1400,0.1690361499786377
@@ -38,9 +40,10 @@ Dimension,Size,Average Time(s)
 9,2d,1400,0.1681070327758789
 10,2d,1400,0.16741085052490234
 
-Dimension,Size,Average Time(s)
+Dimension,Size,Avg Time
 2d,1400,0.169889
 
+Run,Dimension,Size,Time(s)
 1,2d,1800,0.2795569896697998
 2,2d,1800,0.27457427978515625
 3,2d,1800,0.2746570110321045
@@ -52,9 +55,10 @@ Dimension,Size,Average Time(s)
 9,2d,1800,0.2739064693450928
 10,2d,1800,0.3200056552886963
 
-Dimension,Size,Average Time(s)
+Dimension,Size,Avg Time
 2d,1800,0.279845
 
+Run,Dimension,Size,Time(s)
 1,2d,2200,0.43709373474121094
 2,2d,2200,0.4208791255950928
 3,2d,2200,0.42546558380126953
@@ -66,7 +70,7 @@ Dimension,Size,Average Time(s)
 9,2d,2200,0.4183773994445801
 10,2d,2200,0.4109058380126953
 
-Dimension,Size,Average Time(s)
+Dimension,Size,Avg Time
 2d,2200,0.418979
 
 1,2d,2600,0.5881175994873047
@@ -80,9 +84,10 @@ Dimension,Size,Average Time(s)
 9,2d,2600,0.586672306060791
 10,2d,2600,0.5814216136932373
 
-Dimension,Size,Average Time(s)
+Dimension,Size,Avg Time
 2d,2600,0.589955
 
+Run,Dimension,Size,Time(s)
 1,2d,3000,0.8745088577270508
 2,2d,3000,0.8605062961578369
 3,2d,3000,0.7870364189147949
@@ -94,5 +99,5 @@ Dimension,Size,Average Time(s)
 9,2d,3000,0.7965540885925293
 10,2d,3000,0.801414966583252
 
-Dimension,Size,Average Time(s)
+Dimension,Size,Avg Time
 2d,3000,0.802119
