@@ -35,7 +35,7 @@ public class Server implements Runnable {
                 threadPool.execute(connectionHandler);
             }
         }
-        catch (IOException e) {
+        catch (Exception e) {
             shutdown();
         }
     }
