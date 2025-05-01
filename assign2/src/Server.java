@@ -27,15 +27,17 @@ public class Server implements Runnable {
     public void run() {
         try {
             server = new ServerSocket(9999);
-            threadPool = Executors.newCachedThreadPool();
+
             while (done == false) {
                 Socket newClient = server.accept();
+                //System.out.println("New client connected: " + newClient.getInetAddress().getHostAddress());
                 ConnectionHandler connectionHandler = new ConnectionHandler(newClient);
                 connections.add(connectionHandler);
-                threadPool.execute(connectionHandler);
+                Thread.ofVirtual().start(connectionHandler);
             }
         }
         catch (Exception e) {
+            System.err.println("Server error: " + e.getMessage());
             shutdown();
         }
     }
@@ -51,7 +53,7 @@ public class Server implements Runnable {
      public void shutdown() {
         try {
             done = true;
-            if (server.isClosed() == false) {
+            if (server != null && server.isClosed() == false) {
                 server.close();
             }
             for (ConnectionHandler connection : connections) {
@@ -59,7 +61,7 @@ public class Server implements Runnable {
             }
         }
         catch (IOException e) {
-            // ignore
+            System.err.println("Error shutting down server: " + e.getMessage());
         }
      }
 
@@ -93,8 +95,22 @@ public class Server implements Runnable {
                 broadcastMessage("User " + clientUsername + " has entered the chat room :)");
 
                 // TODO -> update messages that the user receives
+                String messageFromClient;
+                while ((messageFromClient = clientInput.readLine()) != null) {
+                    if (messageFromClient.equalsIgnoreCase("/quit")) {
+                        broadcastMessage("-- User " + clientUsername + " has left the chat room --");
+                        connections.remove(this);
+                        shutdown();
+                        break;
+                    }
+                    broadcastMessage(clientUsername + ": " + messageFromClient);
+                }
             }
             catch (IOException e) {
+                connections.remove(this);
+                if (clientUsername != null && !clientUsername.isEmpty()) {
+                    broadcastMessage("-- User " + clientUsername + " has disconnected unexpectedly --");
+                }
                 shutdown();
             }
         }
@@ -108,12 +124,12 @@ public class Server implements Runnable {
                 clientInput.close();
                 clientOutput.close();
 
-                if (client.isClosed() == false) {
+                if (client != null && client.isClosed() == false) {
                     client.close();
                 }
             }
             catch (IOException e) {
-                // ignore
+                System.err.println("Error closing connection: " + e.getMessage());
             }
         }
     }

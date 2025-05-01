@@ -16,7 +16,7 @@ public class Client implements Runnable {
     @Override
     public void run() {
         try {
-            Socket client = new Socket("127.0.0.1", 9999);
+            client = new Socket("127.0.0.1", 9999);
             clientOutput = new PrintWriter(client.getOutputStream(), true);
             clientInput = new BufferedReader(new InputStreamReader(client.getInputStream()));
 
@@ -30,7 +30,7 @@ public class Client implements Runnable {
             }
         }
         catch (IOException e) {
-            // TODO -> handle
+            shutdown();
         }
     }
 
@@ -41,11 +41,14 @@ public class Client implements Runnable {
             clientOutput.close();
 
             if (client.isClosed() == false) {
-
+                client.close();
             }
+
+            System.exit(0);
         }
         catch (IOException e) {
-            // ignore
+            System.err.println("Error closing connection: " + e.getMessage());
+            System.exit(1);
         }
     }
 
@@ -59,6 +62,8 @@ public class Client implements Runnable {
                 while (done == false) {
                     String message = inputReader.readLine();
                     if (message.equals("/quit")) {
+                        System.out.println("Disconnecting from chat... See you later :)");
+                        clientOutput.println("/quit");
                         inputReader.close();
                         shutdown();
                     }
