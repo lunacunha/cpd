@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.net.Socket;
 import java.net.ServerSocket;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -19,7 +18,7 @@ public class Server implements Runnable {
     private ServerSocket server;
     private boolean done;
     private ExecutorService threadPool;
-    private final Map<String, ChatRoom> rooms = new HashMap<>();
+    private final Map<String, ChatRoom> chatRooms = new HashMap<>();
 
     public Server() {
         connections = new ArrayList<>();
@@ -106,6 +105,34 @@ public class Server implements Runnable {
                         connections.remove(this);
                         shutdown();
                         break;
+                    }
+                    else if (messageFromClient.startsWith("/create")) {
+                        String newChatRoomName = messageFromClient.substring(8).trim();
+                        ChatRoom newChatRoom = new ChatRoom(newChatRoomName);
+
+                        if (chatRooms.containsKey(newChatRoomName) == false) {
+                            chatRooms.put(newChatRoomName, newChatRoom);
+                        }
+                        if (currentRoom != null) {
+                            currentRoom.removeUserFromChatRoom(this);
+                        }
+                        newChatRoom.addUserToChatRoom(this);
+                        currentRoom = newChatRoom;
+                    }
+                    else if (messageFromClient.startsWith("/join")) {
+                        String chatRoomName = messageFromClient.substring(8).trim();
+
+                        if (chatRooms.containsKey(chatRoomName)) {
+                            ChatRoom chatRoomToJoin = chatRooms.get(chatRoomName);
+                            if (currentRoom != null) {
+                                chatRooms.get(chatRoomName).removeUserFromChatRoom(this);
+                            }
+                            chatRoomToJoin.addUserToChatRoom(this);
+                            currentRoom = chatRoomToJoin;
+                        }
+                        else {
+                            sendMessage("Sorry... you cannot join this chat room because it does not exist.");
+                        }
                     }
                     broadcastMessage(clientUsername + ": " + messageFromClient);
                 }
