@@ -5,6 +5,8 @@ import java.net.Socket;
 import java.net.ServerSocket;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * This program demonstrates a simple TCP/IP socket server.
@@ -17,6 +19,7 @@ public class Server implements Runnable {
     private ServerSocket server;
     private boolean done;
     private ExecutorService threadPool;
+    private final Map<String, ChatRoom> rooms = new HashMap<>();
 
     public Server() {
         connections = new ArrayList<>();
@@ -72,6 +75,7 @@ public class Server implements Runnable {
         private PrintWriter clientOutput;
         private String clientUsername;
         private String clientPassword;
+        private ChatRoom currentRoom;
 
         public ConnectionHandler(Socket client) {
             this.client = client;
@@ -119,6 +123,10 @@ public class Server implements Runnable {
             clientOutput.println(message);
         }
 
+        public String getClientUserName() {
+            return clientUsername;
+        }
+
         public void shutdown() {
             try {
                 clientInput.close();
@@ -133,6 +141,7 @@ public class Server implements Runnable {
             }
         }
     }
+
 
     public static void main(String[] args) {
         Server server = new Server();
