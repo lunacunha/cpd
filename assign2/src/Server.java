@@ -118,14 +118,19 @@ public class Server implements Runnable {
                         }
                         newChatRoom.addUserToChatRoom(this);
                         currentRoom = newChatRoom;
+                        sendMessage("New chat room - " + currentRoom.getChatRoomName() + " - has been created!");
                     }
                     else if (messageFromClient.startsWith("/join")) {
-                        String chatRoomName = messageFromClient.substring(8).trim();
+                        String chatRoomName = messageFromClient.substring(6).trim();
 
                         if (chatRooms.containsKey(chatRoomName)) {
                             ChatRoom chatRoomToJoin = chatRooms.get(chatRoomName);
+                            if (currentRoom == chatRoomToJoin) {
+                                sendMessage("You are already in this chat room :)");
+                                break;
+                            }
                             if (currentRoom != null) {
-                                chatRooms.get(chatRoomName).removeUserFromChatRoom(this);
+                                currentRoom.removeUserFromChatRoom(this);
                             }
                             chatRoomToJoin.addUserToChatRoom(this);
                             currentRoom = chatRoomToJoin;
