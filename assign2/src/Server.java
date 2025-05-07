@@ -52,7 +52,7 @@ public class Server implements Runnable {
         }
     }
 
-     public void shutdown() {
+    public void shutdown() {
         try {
             done = true;
             if (server != null && server.isClosed() == false) {
@@ -65,7 +65,7 @@ public class Server implements Runnable {
         catch (IOException e) {
             System.err.println("Error shutting down server: " + e.getMessage());
         }
-     }
+    }
 
     class ConnectionHandler implements Runnable {
 
@@ -89,61 +89,106 @@ public class Server implements Runnable {
                 clientOutput.println("Enter your username:");
                 clientUsername = clientInput.readLine();
 
-                // TODO -> the clients need to have a password to authenticate
-                //clientOutput.println("Enter your password:");
-                //clientPassword = clientInput.readLine();
-
                 System.out.println("Welcome " + clientUsername + " :)");
 
-                broadcastMessage("User " + clientUsername + " has entered the chat room :)");
+                // Inform user they're not in a chat room initially
+                sendMessage("Welcome " + clientUsername + "! You aren't in any chat room yet.");
+                sendMessage("Look at available rooms with /rooms or create one with /create [roomname]");
 
-                // TODO -> update messages that the user receives
                 String messageFromClient;
                 while ((messageFromClient = clientInput.readLine()) != null) {
                     if (messageFromClient.equalsIgnoreCase("/quit")) {
-                        broadcastMessage("-- User " + clientUsername + " has left the chat room --");
+                        if (currentRoom != null) {
+                            currentRoom.removeUserFromChatRoom(this);
+                        }
+                        broadcastMessage("-- User " + clientUsername + " has left the chat --");
                         connections.remove(this);
                         shutdown();
                         break;
                     }
+
                     else if (messageFromClient.startsWith("/create")) {
                         String newChatRoomName = messageFromClient.substring(8).trim();
-                        ChatRoom newChatRoom = new ChatRoom(newChatRoomName);
 
-                        if (chatRooms.containsKey(newChatRoomName) == false) {
-                            chatRooms.put(newChatRoomName, newChatRoom);
+                        if (newChatRoomName.isEmpty()) {
+                            sendMessage("Please provide a name for the chat room: /create [roomname]");
+                            continue;
                         }
+
+                        if (chatRooms.containsKey(newChatRoomName)) {
+                            sendMessage("Chat room '" + newChatRoomName + "' already exists. Join it with: /join " + newChatRoomName);
+                            continue;
+                        }
+
+                        ChatRoom newChatRoom = new ChatRoom(newChatRoomName);
+                        chatRooms.put(newChatRoomName, newChatRoom);
+
                         if (currentRoom != null) {
                             currentRoom.removeUserFromChatRoom(this);
                         }
+
                         newChatRoom.addUserToChatRoom(this);
                         currentRoom = newChatRoom;
-                        sendMessage("New chat room - " + currentRoom.getChatRoomName() + " - has been created!");
+                        sendMessage("New chat room '" + currentRoom.getChatRoomName() + "' has been created!");
                     }
+
                     else if (messageFromClient.startsWith("/join")) {
                         String chatRoomName = messageFromClient.substring(6).trim();
 
+                        if (chatRoomName.isEmpty()) {
+                            sendMessage("Please provide a name of the room to join: /join [room name]");
+                            continue;
+                        }
+
                         if (chatRooms.containsKey(chatRoomName)) {
                             ChatRoom chatRoomToJoin = chatRooms.get(chatRoomName);
+
                             if (currentRoom == chatRoomToJoin) {
                                 sendMessage("You are already in this chat room :)");
-                                break;
+                                continue;
                             }
+
                             if (currentRoom != null) {
                                 currentRoom.removeUserFromChatRoom(this);
                             }
-                            chatRoomToJoin.addUserToChatRoom(this);
+
                             currentRoom = chatRoomToJoin;
+                            currentRoom.addUserToChatRoom(this);
+                            sendMessage("You have joined the chat room: " + chatRoomName);
                         }
                         else {
-                            sendMessage("Sorry... you cannot join this chat room because it does not exist.");
+                            sendMessage("Sorry... you cannot join '" + chatRoomName + "' because it does not exist.");
+                            sendMessage("Available rooms: " + String.join(", ", chatRooms.keySet()));
                         }
                     }
-                    broadcastMessage(clientUsername + ": " + messageFromClient);
+
+                    else if (messageFromClient.startsWith("/rooms")) {
+                        if (chatRooms.isEmpty()) {
+                            sendMessage("There are no chat rooms available... create one with /create [room name] :)");
+                        }
+                        else {
+                            sendMessage("Available chat rooms:");
+                            for (String roomName : chatRooms.keySet()) {
+                                sendMessage("-- " + roomName + " --");
+                            }
+                            sendMessage("Join a room with /join [room name] or create a new one with /create [room name] :)");
+                        }
+                    }
+                    else {
+                        // Regular message handling
+                        if (currentRoom == null) {
+                            sendMessage("You are not in any chat room... use /join [room name] or create one with /create [room name]");
+                        } else {
+                            currentRoom.broadcastMessage(clientUsername + ": " + messageFromClient);
+                        }
+                    }
                 }
             }
             catch (IOException e) {
                 connections.remove(this);
+                if (currentRoom != null) {
+                    currentRoom.removeUserFromChatRoom(this);
+                }
                 if (clientUsername != null && !clientUsername.isEmpty()) {
                     broadcastMessage("-- User " + clientUsername + " has disconnected unexpectedly --");
                 }
@@ -151,7 +196,7 @@ public class Server implements Runnable {
             }
         }
 
-        public  void sendMessage(String message) {
+        public void sendMessage(String message) {
             clientOutput.println(message);
         }
 
@@ -179,5 +224,4 @@ public class Server implements Runnable {
         Server server = new Server();
         server.run();
     }
-
 }
