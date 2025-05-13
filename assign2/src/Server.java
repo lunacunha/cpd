@@ -8,9 +8,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * This program demonstrates a simple TCP/IP socket server.
- *
- * @author www.codejava.net
+ * This program demonstrates a simple TCP/IP socket server with authentication.
  */
 public class Server implements Runnable {
 
@@ -19,20 +17,24 @@ public class Server implements Runnable {
     private boolean done;
     private ExecutorService threadPool;
     private final Map<String, ChatRoom> chatRooms = new HashMap<>();
+    private UserManager userManager;
 
     public Server() {
         connections = new ArrayList<>();
         done = false;
+        userManager = new UserManager();
     }
 
     @Override
     public void run() {
         try {
             server = new ServerSocket(9999);
+            System.out.println("Server started on port 9999");
+            System.out.println("Waiting for client connections...");
 
             while (done == false) {
                 Socket newClient = server.accept();
-                //System.out.println("New client connected: " + newClient.getInetAddress().getHostAddress());
+                System.out.println("New client connected: " + newClient.getInetAddress().getHostAddress());
                 ConnectionHandler connectionHandler = new ConnectionHandler(newClient);
                 connections.add(connectionHandler);
                 Thread.ofVirtual().start(connectionHandler);
@@ -75,6 +77,7 @@ public class Server implements Runnable {
         private String clientUsername;
         private String clientPassword;
         private ChatRoom currentRoom;
+        private boolean isAuthenticated = false;
 
         public ConnectionHandler(Socket client) {
             this.client = client;
@@ -86,12 +89,17 @@ public class Server implements Runnable {
                 clientOutput = new PrintWriter(client.getOutputStream(), true);
                 clientInput = new BufferedReader(new InputStreamReader(client.getInputStream()));
 
-                clientOutput.println("Enter your username:");
-                clientUsername = clientInput.readLine();
+                // Authentication process
+                isAuthenticated = authenticate();
 
-                System.out.println("Welcome " + clientUsername + " :)");
+                if (!isAuthenticated) {
+                    sendMessage("Authentication failed. Disconnecting...");
+                    shutdown();
+                    connections.remove(this);
+                    return;
+                }
 
-                // Inform user they're not in a chat room initially
+                System.out.println("User authenticated: " + clientUsername);
                 sendMessage("Welcome " + clientUsername + "! You aren't in any chat room yet.");
                 sendMessage("Look at available rooms with /rooms or create one with /create [roomname]");
 
@@ -106,7 +114,22 @@ public class Server implements Runnable {
                         shutdown();
                         break;
                     }
+                    else if (messageFromClient.startsWith("/register") && messageFromClient.length() > 10) {
+                        // Format: /register username password
+                        String[] parts = messageFromClient.substring(10).trim().split("\\s+", 2);
+                        if (parts.length == 2) {
+                            String newUsername = parts[0];
+                            String newPassword = parts[1];
 
+                            if (userManager.registerUser(newUsername, newPassword)) {
+                                sendMessage("User " + newUsername + " registered successfully!");
+                            } else {
+                                sendMessage("Username " + newUsername + " already exists!");
+                            }
+                        } else {
+                            sendMessage("Usage: /register username password");
+                        }
+                    }
                     else if (messageFromClient.startsWith("/create")) {
                         String newChatRoomName = messageFromClient.substring(8).trim();
 
@@ -169,7 +192,8 @@ public class Server implements Runnable {
                         else {
                             sendMessage("Available chat rooms:");
                             for (String roomName : chatRooms.keySet()) {
-                                sendMessage("-- " + roomName + " --");
+                                ChatRoom room = chatRooms.get(roomName);
+                                sendMessage("-- " + roomName + " (" + room.getParticipantCount() + " users) --");
                             }
                             sendMessage("Join a room with /join [room name] or create a new one with /create [room name] :)");
                         }
@@ -193,6 +217,36 @@ public class Server implements Runnable {
                     broadcastMessage("-- User " + clientUsername + " has disconnected unexpectedly --");
                 }
                 shutdown();
+            }
+        }
+
+        private boolean authenticate() {
+            try {
+                int attempts = 0;
+                final int MAX_ATTEMPTS = 3;
+
+                while (attempts < MAX_ATTEMPTS) {
+                    // Step 1: Ask for username
+                    sendMessage("Enter your username:");
+                    clientUsername = clientInput.readLine();
+
+                    // Step 2: Ask for password
+                    sendMessage("Enter your password:");
+                    clientPassword = clientInput.readLine();
+
+                    // Step 3: Validate credentials
+                    if (userManager.authenticateUser(clientUsername, clientPassword)) {
+                        return true;
+                    } else {
+                        attempts++;
+                        sendMessage("Invalid username or password. Attempts left: " + (MAX_ATTEMPTS - attempts));
+                    }
+                }
+
+                return false;
+            } catch (IOException e) {
+                System.err.println("Authentication error: " + e.getMessage());
+                return false;
             }
         }
 

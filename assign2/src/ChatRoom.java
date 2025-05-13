@@ -27,7 +27,6 @@ public class ChatRoom {
                     participant.sendMessage("-- User " + user.getClientUserName() + " joined the chat room :) --");
                 }
             }
-            // Add the join message to chat history
             previousMessages.add("-- User " + user.getClientUserName() + " joined the chat room :) --");
         }
         catch (Exception e) {
@@ -38,8 +37,7 @@ public class ChatRoom {
     public void removeUserFromChatRoom(Server.ConnectionHandler user) {
         try {
             currentParticipants.remove(user);
-            // Only broadcast if there are still people in the room
-            if (!currentParticipants.isEmpty()) {
+            if (currentParticipants.isEmpty() == false) {
                 String leaveMessage = "-- User " + user.getClientUserName() + " left the chat room --";
                 broadcastMessage(leaveMessage);
                 previousMessages.add(leaveMessage);
@@ -56,8 +54,7 @@ public class ChatRoom {
                 user.sendMessage(message);
             }
         }
-        // Only store non-command messages in history
-        if (!message.startsWith("/")) {
+        if (message.startsWith("/") == false) {
             previousMessages.add(message);
         }
     }
@@ -69,7 +66,7 @@ public class ChatRoom {
                 for (String message : previousMessages) {
                     user.sendMessage(message);
                 }
-                user.sendMessage("--- End of History ---");
+                user.sendMessage("-------------------------");
             }
         } catch (Exception e) {
             System.err.println("Error sending previous messages: " + e.getMessage());
