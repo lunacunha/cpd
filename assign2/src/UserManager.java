@@ -1,6 +1,8 @@
 import java.io.*;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * Manages user accounts and authentication for the chat system.
@@ -31,6 +33,7 @@ public class UserManager {
 
     private Map<String, User> users = new HashMap<>();
     private final String USER_FILE = "users.txt";
+    private final ReadWriteLock usersLock = new ReentrantReadWriteLock();
 
     public UserManager() {
         loadUsers();
@@ -49,13 +52,18 @@ public class UserManager {
             BufferedReader reader = new BufferedReader(new FileReader(file));
             String line;
 
-            while ((line = reader.readLine()) != null) {
-                String[] parts = line.split(":");
-                if (parts.length == 2) {
-                    String username = parts[0];
-                    String password = parts[1];
-                    users.put(username, new User(username, password));
+            usersLock.writeLock().lock();
+            try {
+                while ((line = reader.readLine()) != null) {
+                    String[] parts = line.split(":");
+                    if (parts.length == 2) {
+                        String username = parts[0];
+                        String password = parts[1];
+                        users.put(username, new User(username, password));
+                    }
                 }
+            } finally {
+                usersLock.writeLock().unlock();
             }
 
             reader.close();
@@ -69,8 +77,8 @@ public class UserManager {
     private void createDefaultUsersFile() {
         try {
             PrintWriter writer = new PrintWriter(new FileWriter(USER_FILE));
-            writer.println("marta:password123");
-            writer.println("luna:password456");
+            writer.println("luna:password123");
+            writer.println("marta:password456");
             writer.println("tiago:password789");
             writer.close();
             System.out.println("Default users file created");
@@ -84,8 +92,13 @@ public class UserManager {
         try {
             PrintWriter writer = new PrintWriter(new FileWriter(USER_FILE));
 
-            for (User user : users.values()) {
-                writer.println(user.getUsername() + ":" + user.getPassword());
+            usersLock.readLock().lock();
+            try {
+                for (User user : users.values()) {
+                    writer.println(user.getUsername() + ":" + user.getPassword());
+                }
+            } finally {
+                usersLock.readLock().unlock();
             }
 
             writer.close();
@@ -97,24 +110,40 @@ public class UserManager {
 
     // Register a new user
     public boolean registerUser(String username, String password) {
-        if (users.containsKey(username)) {
-            return false; // User already exists
+        usersLock.writeLock().lock();
+        try {
+            if (users.containsKey(username)) {
+                return false; // User already exists
+            }
+
+            User newUser = new User(username, password);
+            users.put(username, newUser);
+        } finally {
+            usersLock.writeLock().unlock();
         }
 
-        User newUser = new User(username, password);
-        users.put(username, newUser);
         saveUsers();
         return true;
     }
 
     // Authenticate a user
     public boolean authenticateUser(String username, String password) {
-        User user = users.get(username);
-        return user != null && user.authenticate(password);
+        usersLock.readLock().lock();
+        try {
+            User user = users.get(username);
+            return user != null && user.authenticate(password);
+        } finally {
+            usersLock.readLock().unlock();
+        }
     }
 
     // Check if a user exists
     public boolean userExists(String username) {
-        return users.containsKey(username);
+        usersLock.readLock().lock();
+        try {
+            return users.containsKey(username);
+        } finally {
+            usersLock.readLock().unlock();
+        }
     }
 }
