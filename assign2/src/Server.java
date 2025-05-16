@@ -7,9 +7,11 @@ import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
- * This program demonstrates a simple TCP/IP socket server with authentication.
+ * This program demonstrates a simple TCP/IP socket server with authentication and token-based session management.
  */
 public class Server implements Runnable {
 
@@ -20,11 +22,17 @@ public class Server implements Runnable {
     private final Map<String, ChatRoom> chatRooms = new HashMap<>();
     private final ReadWriteLock chatRoomsLock = new ReentrantReadWriteLock();
     private UserManager userManager;
+    private final ExecutorService threadPool;
+    // Map to track active sessions by token
+    private final Map<String, ConnectionHandler> activeSessionsByToken = new HashMap<>();
+    private final ReadWriteLock sessionsLock = new ReentrantReadWriteLock();
 
     public Server() {
         connections = new ArrayList<>();
         done = false;
         userManager = new UserManager();
+        // Create a virtual thread per task executor
+        threadPool = Executors.newVirtualThreadPerTaskExecutor();
     }
 
     @Override
@@ -35,18 +43,26 @@ public class Server implements Runnable {
             System.out.println("Waiting for client connections...");
 
             while (!done) {
-                Socket newClient = server.accept();
-                System.out.println("New client connected: " + newClient.getInetAddress().getHostAddress());
-                ConnectionHandler connectionHandler = new ConnectionHandler(newClient);
-
-                connectionsLock.writeLock().lock();
                 try {
-                    connections.add(connectionHandler);
-                } finally {
-                    connectionsLock.writeLock().unlock();
-                }
+                    Socket newClient = server.accept();
+                    System.out.println("New client connected: " + newClient.getInetAddress().getHostAddress());
+                    ConnectionHandler connectionHandler = new ConnectionHandler(newClient);
 
-                Thread.ofVirtual().start(connectionHandler);
+                    connectionsLock.writeLock().lock();
+                    try {
+                        connections.add(connectionHandler);
+                    } finally {
+                        connectionsLock.writeLock().unlock();
+                    }
+
+                    // Submit connection handler to virtual thread pool
+                    threadPool.submit(connectionHandler);
+                } catch (IOException e) {
+                    if (!done) {
+                        System.err.println("Error accepting connections: " + e.getMessage());
+                        shutdown();
+                    }
+                }
             }
         }
         catch (Exception e) {
@@ -60,7 +76,9 @@ public class Server implements Runnable {
         try {
             for (ConnectionHandler connection : connections) {
                 if (connection != null) {
-                    connection.sendMessage(message);
+                    final ConnectionHandler conn = connection; // Create final reference for lambda
+                    // Use virtual threads for sending messages to avoid blocking
+                    threadPool.submit(() -> conn.sendMessage(message));
                 }
             }
         } finally {
@@ -78,11 +96,26 @@ public class Server implements Runnable {
             connectionsLock.readLock().lock();
             try {
                 for (ConnectionHandler connection : connections) {
-                    connection.shutdown();
+                    final ConnectionHandler conn = connection; // Create final reference for lambda
+                    if (conn != null) {
+                        // Use virtual threads for shutdown operations
+                        threadPool.submit(conn::shutdown);
+                    }
                 }
             } finally {
                 connectionsLock.readLock().unlock();
             }
+
+            // Clear active sessions
+            sessionsLock.writeLock().lock();
+            try {
+                activeSessionsByToken.clear();
+            } finally {
+                sessionsLock.writeLock().unlock();
+            }
+
+            // Shutdown the thread pool gracefully
+            threadPool.shutdown();
         }
         catch (IOException e) {
             System.err.println("Error shutting down server: " + e.getMessage());
@@ -98,6 +131,7 @@ public class Server implements Runnable {
         private String clientPassword;
         private ChatRoom currentRoom;
         private boolean isAuthenticated = false;
+        private TokenManager authToken = null;
 
         public ConnectionHandler(Socket client) {
             this.client = client;
@@ -109,8 +143,46 @@ public class Server implements Runnable {
                 clientOutput = new PrintWriter(client.getOutputStream(), true);
                 clientInput = new BufferedReader(new InputStreamReader(client.getInputStream()));
 
-                // Authentication process
-                isAuthenticated = authenticate();
+                // Check first message for token resumption
+                String firstMessage = clientInput.readLine();
+
+                // Check if client is trying to resume a session with a token
+                if (firstMessage != null && firstMessage.startsWith("/token ")) {
+                    String token = firstMessage.substring(7).trim();
+                    isAuthenticated = resumeSession(token);
+
+                    if (!isAuthenticated) {
+                        sendMessage("Invalid or expired token. Please authenticate.");
+                        isAuthenticated = authenticate();
+                    } else {
+                        sendMessage("Session resumed. Welcome back, " + clientUsername + "!");
+
+                        // If user was in a chat room, rejoin it
+                        String previousRoom = userManager.getUserCurrentChatRoom(clientUsername);
+                        if (previousRoom != null) {
+                            chatRoomsLock.readLock().lock();
+                            try {
+                                ChatRoom room = chatRooms.get(previousRoom);
+                                if (room != null) {
+                                    currentRoom = room;
+                                    room.addUserToChatRoom(this);
+                                    sendMessage("You have been reconnected to room: " + previousRoom);
+                                }
+                            } finally {
+                                chatRoomsLock.readLock().unlock();
+                            }
+                        }
+                    }
+                } else {
+                    // Normal authentication process
+                    isAuthenticated = authenticate();
+
+                    // Process the first message if it wasn't a token command
+                    if (isAuthenticated && firstMessage != null && !firstMessage.startsWith("/token ")) {
+                        // Process the first message normally
+                        processMessage(firstMessage);
+                    }
+                }
 
                 if (!isAuthenticated) {
                     sendMessage("Authentication failed. Disconnecting...");
@@ -125,150 +197,16 @@ public class Server implements Runnable {
                 }
 
                 System.out.println("User authenticated: " + clientUsername);
-                sendMessage("Welcome " + clientUsername + "! You aren't in any chat room yet.");
-                sendMessage("Look at available rooms with /rooms or create one with /create [roomname]");
+
+                if (firstMessage == null || firstMessage.startsWith("/token ")) {
+                    sendMessage("Welcome " + clientUsername + "! You aren't in any chat room yet.");
+                    sendMessage("Use /join [roomname] to enter a room. Rooms are created automatically!");                }
 
                 String messageFromClient;
                 while ((messageFromClient = clientInput.readLine()) != null) {
-                    if (messageFromClient.equalsIgnoreCase("/quit")) {
-                        if (currentRoom != null) {
-                            currentRoom.removeUserFromChatRoom(this);
-                        }
-                        broadcastMessage("-- User " + clientUsername + " has left the chat --");
+                    final String message = messageFromClient; // Create final copy for lambda
 
-                        connectionsLock.writeLock().lock();
-                        try {
-                            connections.remove(this);
-                        } finally {
-                            connectionsLock.writeLock().unlock();
-                        }
-
-                        shutdown();
-                        break;
-                    }
-                    else if (messageFromClient.startsWith("/register") && messageFromClient.length() > 10) {
-                        // Format: /register username password
-                        String[] parts = messageFromClient.substring(10).trim().split("\\s+", 2);
-                        if (parts.length == 2) {
-                            String newUsername = parts[0];
-                            String newPassword = parts[1];
-
-                            if (userManager.registerUser(newUsername, newPassword)) {
-                                sendMessage("User " + newUsername + " registered successfully!");
-                            } else {
-                                sendMessage("Username " + newUsername + " already exists!");
-                            }
-                        } else {
-                            sendMessage("Usage: /register username password");
-                        }
-                    }
-                    else if (messageFromClient.startsWith("/create")) {
-                        String newChatRoomName = messageFromClient.substring(8).trim();
-
-                        if (newChatRoomName.isEmpty()) {
-                            sendMessage("Please provide a name for the chat room: /create [roomname]");
-                            continue;
-                        }
-
-                        chatRoomsLock.readLock().lock();
-                        boolean roomExists;
-                        try {
-                            roomExists = chatRooms.containsKey(newChatRoomName);
-                        } finally {
-                            chatRoomsLock.readLock().unlock();
-                        }
-
-                        if (roomExists) {
-                            sendMessage("Chat room '" + newChatRoomName + "' already exists. Join it with: /join " + newChatRoomName);
-                            continue;
-                        }
-
-                        ChatRoom newChatRoom = new ChatRoom(newChatRoomName);
-
-                        chatRoomsLock.writeLock().lock();
-                        try {
-                            chatRooms.put(newChatRoomName, newChatRoom);
-                        } finally {
-                            chatRoomsLock.writeLock().unlock();
-                        }
-
-                        if (currentRoom != null) {
-                            currentRoom.removeUserFromChatRoom(this);
-                        }
-
-                        newChatRoom.addUserToChatRoom(this);
-                        currentRoom = newChatRoom;
-                        sendMessage("New chat room '" + currentRoom.getChatRoomName() + "' has been created!");
-                    }
-                    else if (messageFromClient.startsWith("/join")) {
-                        String chatRoomName = messageFromClient.substring(6).trim();
-
-                        if (chatRoomName.isEmpty()) {
-                            sendMessage("Please provide a name of the room to join: /join [room name]");
-                            continue;
-                        }
-
-                        ChatRoom chatRoomToJoin = null;
-                        chatRoomsLock.readLock().lock();
-                        try {
-                            if (chatRooms.containsKey(chatRoomName)) {
-                                chatRoomToJoin = chatRooms.get(chatRoomName);
-                            }
-                        } finally {
-                            chatRoomsLock.readLock().unlock();
-                        }
-
-                        if (chatRoomToJoin != null) {
-                            if (currentRoom == chatRoomToJoin) {
-                                sendMessage("You are already in this chat room :)");
-                                continue;
-                            }
-
-                            if (currentRoom != null) {
-                                currentRoom.removeUserFromChatRoom(this);
-                            }
-
-                            currentRoom = chatRoomToJoin;
-                            currentRoom.addUserToChatRoom(this);
-                            sendMessage("You have joined the chat room: " + chatRoomName);
-                        }
-                        else {
-                            sendMessage("Sorry... you cannot join '" + chatRoomName + "' because it does not exist.");
-
-                            chatRoomsLock.readLock().lock();
-                            try {
-                                sendMessage("Available rooms: " + String.join(", ", chatRooms.keySet()));
-                            } finally {
-                                chatRoomsLock.readLock().unlock();
-                            }
-                        }
-                    }
-                    else if (messageFromClient.startsWith("/rooms")) {
-                        chatRoomsLock.readLock().lock();
-                        try {
-                            if (chatRooms.isEmpty()) {
-                                sendMessage("There are no chat rooms available... create one with /create [room name] :)");
-                            }
-                            else {
-                                sendMessage("Available chat rooms:");
-                                for (String roomName : chatRooms.keySet()) {
-                                    ChatRoom room = chatRooms.get(roomName);
-                                    sendMessage("-- " + roomName + " (" + room.getParticipantCount() + " users) --");
-                                }
-                                sendMessage("Join a room with /join [room name] or create a new one with /create [room name] :)");
-                            }
-                        } finally {
-                            chatRoomsLock.readLock().unlock();
-                        }
-                    }
-                    else {
-                        // Regular message handling
-                        if (currentRoom == null) {
-                            sendMessage("You are not in any chat room... use /join [room name] or create one with /create [room name]");
-                        } else {
-                            currentRoom.broadcastMessage(clientUsername + ": " + messageFromClient);
-                        }
-                    }
+                    threadPool.submit(() -> processMessage(message));
                 }
             }
             catch (IOException e) {
@@ -279,9 +217,13 @@ public class Server implements Runnable {
                     connectionsLock.writeLock().unlock();
                 }
 
-                if (currentRoom != null) {
-                    currentRoom.removeUserFromChatRoom(this);
+                if (isAuthenticated && authToken != null) {
+                    if (currentRoom != null) {
+                        userManager.updateUserChatRoom(clientUsername, currentRoom.getChatRoomName());
+                        currentRoom.removeUserFromChatRoom(this);
+                    }
                 }
+
                 if (clientUsername != null && !clientUsername.isEmpty()) {
                     broadcastMessage("-- User " + clientUsername + " has disconnected unexpectedly --");
                 }
@@ -289,36 +231,180 @@ public class Server implements Runnable {
             }
         }
 
-        private boolean authenticate() {
+        private boolean resumeSession(String tokenString) {
+            String username = userManager.validateToken(tokenString);
+            if (username != null) {
+                clientUsername = username;
+
+                // Register this connection as the active one for this token
+                sessionsLock.writeLock().lock();
+                try {
+                    // If there was a previous connection with this token, disconnect it
+                    ConnectionHandler existingHandler = activeSessionsByToken.get(tokenString);
+                    if (existingHandler != null && existingHandler != this) {
+                        existingHandler.sendMessage("Your session has been resumed from another location.");
+                        existingHandler.shutdown();
+                    }
+
+                    activeSessionsByToken.put(tokenString, this);
+                } finally {
+                    sessionsLock.writeLock().unlock();
+                }
+                return true;
+            }
+            return false;
+        }
+
+        private void processMessage(String messageFromClient) {
             try {
-                int attempts = 0;
-                final int MAX_ATTEMPTS = 3;
+                if (messageFromClient.equalsIgnoreCase("/quit")) {
+                    if (currentRoom != null) {
+                        currentRoom.removeUserFromChatRoom(this);
+                    }
+                    broadcastMessage("-- User " + clientUsername + " has left the chat --");
 
-                while (attempts < MAX_ATTEMPTS) {
-                    // Step 1: Ask for username
-                    sendMessage("Enter your username:");
-                    clientUsername = clientInput.readLine();
+                    connectionsLock.writeLock().lock();
+                    try {
+                        connections.remove(this);
+                    } finally {
+                        connectionsLock.writeLock().unlock();
+                    }
 
-                    // Step 2: Ask for password
-                    sendMessage("Enter your password:");
-                    clientPassword = clientInput.readLine();
+                    // Clean up token when user deliberately quits
+                    if (authToken != null) {
+                        sessionsLock.writeLock().lock();
+                        try {
+                            activeSessionsByToken.remove(authToken.getTokenString());
+                        } finally {
+                            sessionsLock.writeLock().unlock();
+                        }
+                        userManager.invalidateToken(authToken.getTokenString());
+                    }
 
-                    // Step 3: Validate credentials
-                    if (userManager.authenticateUser(clientUsername, clientPassword)) {
-                        return true;
+                    shutdown();
+                }
+                else if (messageFromClient.startsWith("/token")) {
+                    // Client should not manually request tokens this way
+                    sendMessage("Token management is handled automatically by the server.");
+                }
+                else if (messageFromClient.equals("/refresh_token")) {
+                    // Generate a new token for the user
+                    TokenManager newToken = userManager.generateToken(clientUsername);
+                    if (newToken != null) {
+                        // Update session mapping
+                        sessionsLock.writeLock().lock();
+                        try {
+                            if (authToken != null) {
+                                activeSessionsByToken.remove(authToken.getTokenString());
+                            }
+                            activeSessionsByToken.put(newToken.getTokenString(), this);
+                        } finally {
+                            sessionsLock.writeLock().unlock();
+                        }
+
+                        authToken = newToken;
+                        sendMessage("AUTH_TOKEN:" + newToken.getTokenString());
+                        sendMessage("Token refreshed. New token will expire in " + newToken.getSecondsUntilExpiration() + " seconds.");
                     } else {
-                        attempts++;
-                        sendMessage("Invalid username or password. Attempts left: " + (MAX_ATTEMPTS - attempts));
+                        sendMessage("Failed to refresh token.");
                     }
                 }
+                else if (messageFromClient.startsWith("/join")) {
+                    String chatRoomName = messageFromClient.substring(6).trim();
 
-                return false;
-            } catch (IOException e) {
-                System.err.println("Authentication error: " + e.getMessage());
-                return false;
+                    if (chatRoomName.isEmpty()) {
+                        sendMessage("Please provide a room name: /join [room name]");
+                        return;
+                    }
+
+                    ChatRoom chatRoomToJoin;
+                    boolean isNewRoom = false;
+                    chatRoomsLock.readLock().lock();
+                    try {
+                        chatRoomToJoin = chatRooms.get(chatRoomName);
+
+                        if (chatRoomToJoin == null) {
+                            chatRoomsLock.readLock().unlock();
+                            chatRoomsLock.writeLock().lock();
+                            try {
+                                chatRoomToJoin = new ChatRoom(chatRoomName);
+                                chatRooms.put(chatRoomName, chatRoomToJoin);
+                                isNewRoom = true;
+                            } finally {
+                                chatRoomsLock.writeLock().unlock();
+                                chatRoomsLock.readLock().lock();
+                            }
+                        }
+                    } finally {
+                        chatRoomsLock.readLock().unlock();
+                    }
+
+                    if (currentRoom == chatRoomToJoin) {
+                        sendMessage("You are already in this chat room :)");
+                        return;
+                    }
+
+                    if (currentRoom != null) {
+                        sendMessage("Leaving chat room: " + currentRoom.getChatRoomName());
+                        currentRoom.removeUserFromChatRoom(this);
+                    }
+
+                    if (isNewRoom) {
+                        sendMessage("Creating new chat room '" + chatRoomName + "'...");
+                    }
+
+                    currentRoom = chatRoomToJoin;
+                    currentRoom.addUserToChatRoom(this);
+                    userManager.updateUserChatRoom(clientUsername, chatRoomName);
+                }
+                else if (messageFromClient.startsWith("/rooms")) {
+                    chatRoomsLock.readLock().lock();
+                    try {
+                        if (chatRooms.isEmpty()) {
+                            sendMessage("No chat rooms available. Use /join [roomname] to create one!");
+                        } else {
+                            sendMessage("Available chat rooms:");
+                            for (String roomName : chatRooms.keySet()) {
+                                ChatRoom room = chatRooms.get(roomName);
+                                sendMessage("-- " + roomName + " (" + room.getParticipantCount() + " users) --");
+                            }
+                        }
+                    } finally {
+                        chatRoomsLock.readLock().unlock();
+                    }
+                }
+                else {
+                    if (currentRoom == null) {
+                        sendMessage("You are not in any chat room... use /rooms to see which rooms are available :)");
+                    } else {
+                        currentRoom.broadcastMessage(clientUsername + ": " + messageFromClient);
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("Error processing message: " + e.getMessage());
             }
         }
 
+        private boolean authenticate() {
+            try {
+                sendMessage("Enter your username:");
+                clientUsername = clientInput.readLine();
+                sendMessage("Enter your password:");
+                clientPassword = clientInput.readLine();
+
+                if (userManager.authenticateUser(clientUsername, clientPassword)) {
+                    // Gera token (código existente)
+                    authToken = userManager.generateToken(clientUsername);
+                    // ... resto do código ...
+                    return true;
+                } else {
+                    sendMessage("Invalid password for existing user.");
+                    return false;
+                }
+            } catch (IOException e) {
+                return false;
+            }
+        }
         public void sendMessage(String message) {
             clientOutput.println(message);
         }
