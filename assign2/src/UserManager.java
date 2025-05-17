@@ -1,4 +1,7 @@
 import java.io.*;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -10,17 +13,18 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * Manages user accounts and authentication for the chat system.
  * This class combines user storage, authentication and account management.
  * Enhanced with token-based authentication for fault tolerance.
+ * Uses hashing for password storage.
  */
 public class UserManager {
     private static class User {
         private String username;
-        private String password;
+        private String passwordHash; // Agora armazena o hash da senha
         private TokenManager currentToken;
         private String currentChatRoom;
 
-        public User(String username, String password) {
+        public User(String username, String passwordHash) {
             this.username = username;
-            this.password = password;
+            this.passwordHash = passwordHash;
             this.currentToken = null;
             this.currentChatRoom = null;
         }
@@ -29,12 +33,12 @@ public class UserManager {
             return username;
         }
 
-        public String getPassword() {
-            return password;
+        public String getPasswordHash() {
+            return passwordHash;
         }
 
-        public boolean authenticate(String password) {
-            return this.password.equals(password);
+        public boolean authenticate(String passwordHash) {
+            return this.passwordHash.equals(passwordHash);
         }
 
         public TokenManager getCurrentToken() {
@@ -70,13 +74,38 @@ public class UserManager {
         threadPool.submit(this::cleanupExpiredTokens);
     }
 
+    /**
+     * Cria um hash SHA-256 da string fornecida
+     * @param input A string para ser transformada em hash
+     * @return String hash codificada em hexadecimal
+     */
+    private String createHash(String input) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hashBytes = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+
+            // Converter bytes para string hexadecimal
+            StringBuilder hexString = new StringBuilder();
+            for (byte b : hashBytes) {
+                String hex = Integer.toHexString(0xff & b);
+                if (hex.length() == 1) hexString.append('0');
+                hexString.append(hex);
+            }
+            return hexString.toString();
+        } catch (NoSuchAlgorithmException e) {
+            System.err.println("Erro ao criar hash: " + e.getMessage());
+            // Fallback para casos onde o algoritmo não está disponível (não deveria acontecer com SHA-256)
+            return input;
+        }
+    }
+
     // Load users from file
     private void loadUsers() {
         threadPool.submit(() -> {
             try {
                 File file = new File(USER_FILE);
 
-                if (file.exists() == false) {
+                if (!file.exists()) {
                     createDefaultUsersFile();
                 }
 
@@ -89,8 +118,8 @@ public class UserManager {
                         String[] parts = line.split(":");
                         if (parts.length == 2) {
                             String username = parts[0];
-                            String password = parts[1];
-                            users.put(username, new User(username, password));
+                            String passwordHash = parts[1]; // Já é hash no arquivo
+                            users.put(username, new User(username, passwordHash));
                         }
                     }
                 } finally {
@@ -104,15 +133,16 @@ public class UserManager {
         });
     }
 
-    // Create a default users file
+    // Create a default users file with hashed passwords
     private void createDefaultUsersFile() {
         try {
             PrintWriter writer = new PrintWriter(new FileWriter(USER_FILE));
-            writer.println("luna:password123");
-            writer.println("marta:password456");
-            writer.println("tiago:password789");
+            // Armazenar senhas como hash
+            writer.println("luna:" + createHash("password123"));
+            writer.println("marta:" + createHash("password456"));
+            writer.println("tiago:" + createHash("password789"));
             writer.close();
-            System.out.println("Default users file created");
+            System.out.println("Default users file created with hashed passwords");
         } catch (IOException e) {
             System.err.println("Error creating default users file: " + e.getMessage());
         }
@@ -134,7 +164,7 @@ public class UserManager {
 
                 PrintWriter writer = new PrintWriter(new FileWriter(USER_FILE));
                 for (User user : usersCopy.values()) {
-                    writer.println(user.getUsername() + ":" + user.getPassword());
+                    writer.println(user.getUsername() + ":" + user.getPasswordHash());
                 }
 
                 writer.close();
@@ -146,16 +176,18 @@ public class UserManager {
     }
 
     public boolean authenticateUser(String username, String password) {
+        String passwordHash = createHash(password);
+
         usersLock.writeLock().lock();
         try {
             User user = users.get(username);
             if (user == null) {
-                user = new User(username, password);
+                user = new User(username, passwordHash);
                 users.put(username, user);
                 threadPool.submit(this::saveUsers);
                 return true;
             } else {
-                return user.authenticate(password);
+                return user.authenticate(passwordHash);
             }
         } finally {
             usersLock.writeLock().unlock();
