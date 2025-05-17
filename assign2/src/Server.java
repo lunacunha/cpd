@@ -222,6 +222,10 @@ public class Server implements Runnable {
                         userManager.updateUserChatRoom(clientUsername, currentRoom.getChatRoomName());
                         currentRoom.removeUserFromChatRoom(this);
                     }
+
+                    // Se a conexão cair inesperadamente, marcar o usuário como inativo
+                    // para permitir que ele faça login novamente
+                    userManager.markUserInactive(clientUsername);
                 }
 
                 if (clientUsername != null && !clientUsername.isEmpty()) {
@@ -250,6 +254,9 @@ public class Server implements Runnable {
                 } finally {
                     sessionsLock.writeLock().unlock();
                 }
+
+                // Garantir que o usuário seja marcado como ativo
+                userManager.markUserActive(username);
                 return true;
             }
             return false;
@@ -280,6 +287,9 @@ public class Server implements Runnable {
                         }
                         userManager.invalidateToken(authToken.getTokenString());
                     }
+
+                    // Marcar usuário como inativo ao sair
+                    userManager.markUserInactive(clientUsername);
 
                     shutdown();
                 }
@@ -389,22 +399,43 @@ public class Server implements Runnable {
             try {
                 sendMessage("Enter your username:");
                 clientUsername = clientInput.readLine();
+
+                // Verificar se o usuário já está conectado
+                if (userManager.isUserActive(clientUsername)) {
+                    sendMessage("This username is already in use. Please choose another username or try again later.");
+                    return false;
+                }
+
                 sendMessage("Enter your password:");
                 clientPassword = clientInput.readLine();
 
                 if (userManager.authenticateUser(clientUsername, clientPassword)) {
-                    // Gera token (código existente)
+                    // Autenticação bem-sucedida
                     authToken = userManager.generateToken(clientUsername);
-                    // ... resto do código ...
-                    return true;
+                    if (authToken != null) {
+                        sendMessage("AUTH_TOKEN:" + authToken.getTokenString());
+
+                        // Registrar a sessão do token
+                        sessionsLock.writeLock().lock();
+                        try {
+                            activeSessionsByToken.put(authToken.getTokenString(), this);
+                        } finally {
+                            sessionsLock.writeLock().unlock();
+                        }
+
+                        return true;
+                    }
                 } else {
                     sendMessage("Invalid password for existing user.");
                     return false;
                 }
             } catch (IOException e) {
+                System.err.println("Authentication error: " + e.getMessage());
                 return false;
             }
+            return false;
         }
+
         public void sendMessage(String message) {
             clientOutput.println(message);
         }

@@ -8,6 +8,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * Manages user accounts and authentication for the chat system.
@@ -60,9 +62,14 @@ public class UserManager {
 
     private Map<String, User> users = new HashMap<>();
     private Map<String, String> tokenToUsername = new HashMap<>();
+
+    // Conjunto para rastrear usuários ativos (logados)
+    private Set<String> activeUsers = new HashSet<>();
+
     private final String USER_FILE = "users.txt";
     private final ReadWriteLock usersLock = new ReentrantReadWriteLock();
     private final ReadWriteLock tokensLock = new ReentrantReadWriteLock();
+    private final ReadWriteLock activeUsersLock = new ReentrantReadWriteLock();
     private final ExecutorService threadPool;
 
     public UserManager() {
@@ -175,19 +182,76 @@ public class UserManager {
         });
     }
 
+    /**
+     * Verifica se um usuário já está ativo (conectado)
+     * @param username Nome do usuário a verificar
+     * @return true se o usuário já estiver logado, false caso contrário
+     */
+    public boolean isUserActive(String username) {
+        activeUsersLock.readLock().lock();
+        try {
+            return activeUsers.contains(username);
+        } finally {
+            activeUsersLock.readLock().unlock();
+        }
+    }
+
+    /**
+     * Marca um usuário como ativo (logado)
+     * @param username Nome do usuário a marcar como ativo
+     */
+    public void markUserActive(String username) {
+        activeUsersLock.writeLock().lock();
+        try {
+            activeUsers.add(username);
+            System.out.println("User marked as active: " + username);
+        } finally {
+            activeUsersLock.writeLock().unlock();
+        }
+    }
+
+    /**
+     * Marca um usuário como inativo (deslogado)
+     * @param username Nome do usuário a marcar como inativo
+     */
+    public void markUserInactive(String username) {
+        activeUsersLock.writeLock().lock();
+        try {
+            activeUsers.remove(username);
+            System.out.println("User marked as inactive: " + username);
+        } finally {
+            activeUsersLock.writeLock().unlock();
+        }
+    }
+
     public boolean authenticateUser(String username, String password) {
         String passwordHash = createHash(password);
+
+        // Verificar se o usuário já está logado
+        if (isUserActive(username)) {
+            return false; // Usuário já está logado
+        }
 
         usersLock.writeLock().lock();
         try {
             User user = users.get(username);
             if (user == null) {
+                // Novo usuário - criar conta
                 user = new User(username, passwordHash);
                 users.put(username, user);
                 threadPool.submit(this::saveUsers);
+
+                // Marcar como ativo
+                markUserActive(username);
                 return true;
             } else {
-                return user.authenticate(passwordHash);
+                // Usuário existente - verificar senha
+                boolean authenticated = user.authenticate(passwordHash);
+                if (authenticated) {
+                    // Marcar como ativo somente se a autenticação for bem-sucedida
+                    markUserActive(username);
+                }
+                return authenticated;
             }
         } finally {
             usersLock.writeLock().unlock();
@@ -240,7 +304,7 @@ public class UserManager {
         return null;
     }
 
-    // Invalidate a user's token
+    // Invalidate a user's token and mark them as inactive
     public void invalidateToken(String tokenString) {
         tokensLock.writeLock().lock();
         try {
@@ -252,6 +316,9 @@ public class UserManager {
                     if (user != null && user.getCurrentToken() != null &&
                             user.getCurrentToken().getTokenString().equals(tokenString)) {
                         user.setCurrentToken(null);
+
+                        // Marcar usuário como inativo ao invalidar token
+                        markUserInactive(username);
                     }
                 } finally {
                     usersLock.writeLock().unlock();
@@ -313,6 +380,10 @@ public class UserManager {
                             // Remove expired token
                             tokenToUsername.remove(tokenString);
                             user.setCurrentToken(null);
+
+                            // Marcar usuário como inativo quando token expirar
+                            markUserInactive(username);
+
                             System.out.println("Expired token removed for user: " + username);
                         }
                     }
