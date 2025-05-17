@@ -185,7 +185,7 @@ public class Server implements Runnable {
                 }
 
                 if (!isAuthenticated) {
-                    sendMessage("Authentication failed. Disconnecting...");
+                    sendMessage("Authentication failed. Connection closed.");
                     shutdown();
                     connectionsLock.writeLock().lock();
                     try {
@@ -268,7 +268,6 @@ public class Server implements Runnable {
                     if (currentRoom != null) {
                         currentRoom.removeUserFromChatRoom(this);
                     }
-                    broadcastMessage("-- User " + clientUsername + " has left the chat --");
 
                     connectionsLock.writeLock().lock();
                     try {
@@ -317,6 +316,18 @@ public class Server implements Runnable {
                         sendMessage("Token refreshed. New token will expire in " + newToken.getSecondsUntilExpiration() + " seconds.");
                     } else {
                         sendMessage("Failed to refresh token.");
+                    }
+                }
+                else if (messageFromClient.equalsIgnoreCase("/leave")) {
+                    if (currentRoom != null) {
+                        ChatRoom roomToLeave = currentRoom;
+                        currentRoom.removeUserFromChatRoom(this);
+                        userManager.updateUserChatRoom(clientUsername, null);
+                        currentRoom = null;
+                        sendMessage("You have left the chat room: " + roomToLeave.getChatRoomName());
+                        roomToLeave.broadcastMessage("-- User " + clientUsername + " left the room --");
+                    } else {
+                        sendMessage("You're not in any chat room.");
                     }
                 }
                 else if (messageFromClient.startsWith("/join")) {
@@ -396,43 +407,50 @@ public class Server implements Runnable {
         }
 
         private boolean authenticate() {
-            try {
-                sendMessage("Enter your username:");
-                clientUsername = clientInput.readLine();
+            final int MAX_ATTEMPTS = 3;
+            int attempts = 0;
 
-                // Verificar se o usuário já está conectado
-                if (userManager.isUserActive(clientUsername)) {
-                    sendMessage("This username is already in use. Please choose another username or try again later.");
-                    return false;
-                }
-
-                sendMessage("Enter your password:");
-                clientPassword = clientInput.readLine();
-
-                if (userManager.authenticateUser(clientUsername, clientPassword)) {
-                    // Autenticação bem-sucedida
-                    authToken = userManager.generateToken(clientUsername);
-                    if (authToken != null) {
-                        sendMessage("AUTH_TOKEN:" + authToken.getTokenString());
-
-                        // Registrar a sessão do token
-                        sessionsLock.writeLock().lock();
-                        try {
-                            activeSessionsByToken.put(authToken.getTokenString(), this);
-                        } finally {
-                            sessionsLock.writeLock().unlock();
-                        }
-
-                        return true;
+            while (attempts < MAX_ATTEMPTS && !done) {
+                try {
+                    // Primeiro envia a mensagem de erro se for tentativa subsequente
+                    if (attempts > 0) {
+                        sendMessage("Invalid credentials. Attempts remaining: " + (MAX_ATTEMPTS - attempts));
                     }
-                } else {
-                    sendMessage("Invalid password for existing user.");
+
+                    sendMessage("Enter your username:");
+                    clientUsername = clientInput.readLine();
+
+                    if (userManager.isUserActive(clientUsername)) {
+                        sendMessage("This username is already in use. Please choose another username or try again later.");
+                        continue;
+                    }
+
+                    sendMessage("Enter your password:");
+                    clientPassword = clientInput.readLine();
+
+                    if (userManager.authenticateUser(clientUsername, clientPassword)) {
+                        authToken = userManager.generateToken(clientUsername);
+                        if (authToken != null) {
+                            sendMessage("AUTH_TOKEN:" + authToken.getTokenString());
+
+                            sessionsLock.writeLock().lock();
+                            try {
+                                activeSessionsByToken.put(authToken.getTokenString(), this);
+                            } finally {
+                                sessionsLock.writeLock().unlock();
+                            }
+                            return true;
+                        }
+                    } else {
+                        attempts++;
+                    }
+                } catch (IOException e) {
+                    System.err.println("Authentication error: " + e.getMessage());
                     return false;
                 }
-            } catch (IOException e) {
-                System.err.println("Authentication error: " + e.getMessage());
-                return false;
             }
+
+            sendMessage("Too many failed attempts. Disconnecting...");
             return false;
         }
 

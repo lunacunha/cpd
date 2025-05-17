@@ -62,16 +62,16 @@ public class Client implements Runnable {
         try {
             String inputMessage;
             while (!done.get() && (inputMessage = clientInput.readLine()) != null) {
-                final String message = inputMessage; // Create final copy for lambda
+                final String message = inputMessage;
 
                 if (message.startsWith("AUTH_TOKEN:")) {
                     authToken = message.substring("AUTH_TOKEN:".length());
                     System.out.println("You are now authenticated. Token will expire in 30 minutes.");
                     authenticated = true;
-                    System.out.println("Token gerado: " + authToken); // Adicione esta linha
+                    // Removida a linha que exibe o token
                 } else {
-                    // Use virtual thread for printing normal messages
-                    threadPool.submit(() -> System.out.println(message));
+                    // Mensagens normais são impressas diretamente
+                    System.out.println(message);
                 }
             }
         } catch (IOException e) {
