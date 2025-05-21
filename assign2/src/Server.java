@@ -1,39 +1,21 @@
+// Server.java
+import java.net.*;
 import java.io.*;
-import java.util.ArrayList;
-import java.io.IOException;
-import java.net.Socket;
-import java.net.ServerSocket;
+import java.util.*;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
-/**
- * This program demonstrates a simple TCP/IP socket server with authentication and token-based session management.
- */
 public class Server implements Runnable {
 
-    private ArrayList<ConnectionHandler> connections;
+    private final List<ConnectionHandler> connections = new ArrayList<>();
     private ServerSocket server;
-    private boolean done;
+    private boolean done = false;
     private final ReadWriteLock connectionsLock = new ReentrantReadWriteLock();
     private final Map<String, ChatRoom> chatRooms = new HashMap<>();
     private final ReadWriteLock chatRoomsLock = new ReentrantReadWriteLock();
-    private UserManager userManager;
-    private final ExecutorService threadPool;
-    // Map to track active sessions by token
+    private final UserManager userManager = new UserManager();
     private final Map<String, ConnectionHandler> activeSessionsByToken = new HashMap<>();
     private final ReadWriteLock sessionsLock = new ReentrantReadWriteLock();
-
-    public Server() {
-        connections = new ArrayList<>();
-        done = false;
-        userManager = new UserManager();
-        // Create a virtual thread per task executor
-        threadPool = Executors.newVirtualThreadPerTaskExecutor();
-    }
 
     @Override
     public void run() {
@@ -55,8 +37,7 @@ public class Server implements Runnable {
                         connectionsLock.writeLock().unlock();
                     }
 
-                    // Submit connection handler to virtual thread pool
-                    threadPool.submit(connectionHandler);
+                    new Thread(connectionHandler).start();
                 } catch (IOException e) {
                     if (!done) {
                         System.err.println("Error accepting connections: " + e.getMessage());
@@ -64,8 +45,7 @@ public class Server implements Runnable {
                     }
                 }
             }
-        }
-        catch (Exception e) {
+        } catch (IOException e) {
             System.err.println("Server error: " + e.getMessage());
             shutdown();
         }
@@ -76,9 +56,7 @@ public class Server implements Runnable {
         try {
             for (ConnectionHandler connection : connections) {
                 if (connection != null) {
-                    final ConnectionHandler conn = connection; // Create final reference for lambda
-                    // Use virtual threads for sending messages to avoid blocking
-                    threadPool.submit(() -> conn.sendMessage(message));
+                    new Thread(() -> connection.sendMessage(message)).start();
                 }
             }
         } finally {
@@ -87,44 +65,34 @@ public class Server implements Runnable {
     }
 
     public void shutdown() {
+        done = true;
         try {
-            done = true;
-            if (server != null && !server.isClosed()) {
-                server.close();
-            }
+            if (server != null && !server.isClosed()) server.close();
+        } catch (IOException ignored) {}
 
-            connectionsLock.readLock().lock();
-            try {
-                for (ConnectionHandler connection : connections) {
-                    final ConnectionHandler conn = connection; // Create final reference for lambda
-                    if (conn != null) {
-                        // Use virtual threads for shutdown operations
-                        threadPool.submit(conn::shutdown);
-                    }
+        connectionsLock.readLock().lock();
+        try {
+            for (ConnectionHandler connection : connections) {
+                if (connection != null) {
+                    new Thread(connection::shutdown).start();
                 }
-            } finally {
-                connectionsLock.readLock().unlock();
             }
-
-            // Clear active sessions
-            sessionsLock.writeLock().lock();
-            try {
-                activeSessionsByToken.clear();
-            } finally {
-                sessionsLock.writeLock().unlock();
-            }
-
-            // Shutdown the thread pool gracefully
-            threadPool.shutdown();
+        } finally {
+            connectionsLock.readLock().unlock();
         }
-        catch (IOException e) {
-            System.err.println("Error shutting down server: " + e.getMessage());
+
+        sessionsLock.writeLock().lock();
+        try {
+            activeSessionsByToken.clear();
+        } finally {
+            sessionsLock.writeLock().unlock();
         }
+
+        System.exit(0);
     }
 
     class ConnectionHandler implements Runnable {
-
-        private Socket client;
+        private final Socket client;
         private BufferedReader clientInput;
         private PrintWriter clientOutput;
         private String clientUsername;
@@ -141,12 +109,10 @@ public class Server implements Runnable {
         public void run() {
             try {
                 clientOutput = new PrintWriter(client.getOutputStream(), true);
-                clientInput = new BufferedReader(new InputStreamReader(client.getInputStream()));
+                clientInput  = new BufferedReader(new InputStreamReader(client.getInputStream()));
 
-                // Check first message for token resumption
                 String firstMessage = clientInput.readLine();
 
-                // Check if client is trying to resume a session with a token
                 if (firstMessage != null && firstMessage.startsWith("/token ")) {
                     String token = firstMessage.substring(7).trim();
                     isAuthenticated = resumeSession(token);
@@ -157,7 +123,6 @@ public class Server implements Runnable {
                     } else {
                         sendMessage("Session resumed. Welcome back, " + clientUsername + "!");
 
-                        // If user was in a chat room, rejoin it
                         String previousRoom = userManager.getUserCurrentChatRoom(clientUsername);
                         if (previousRoom != null) {
                             chatRoomsLock.readLock().lock();
@@ -174,12 +139,8 @@ public class Server implements Runnable {
                         }
                     }
                 } else {
-                    // Normal authentication process
                     isAuthenticated = authenticate();
-
-                    // Process the first message if it wasn't a token command
                     if (isAuthenticated && firstMessage != null && !firstMessage.startsWith("/token ")) {
-                        // Process the first message normally
                         processMessage(firstMessage);
                     }
                 }
@@ -200,16 +161,15 @@ public class Server implements Runnable {
 
                 if (firstMessage == null || firstMessage.startsWith("/token ")) {
                     sendMessage("Welcome " + clientUsername + "! You aren't in any chat room yet.");
-                    sendMessage("Use /join [roomname] to enter a room. Rooms are created automatically!");                }
+                    sendMessage("Use /join [roomname] to enter a room. Rooms are created automatically!");
+                }
 
                 String messageFromClient;
                 while ((messageFromClient = clientInput.readLine()) != null) {
-                    final String message = messageFromClient; // Create final copy for lambda
-
-                    threadPool.submit(() -> processMessage(message));
+                    final String message = messageFromClient;
+                    new Thread(() -> processMessage(message)).start();
                 }
-            }
-            catch (IOException e) {
+            } catch (IOException e) {
                 connectionsLock.writeLock().lock();
                 try {
                     connections.remove(this);
@@ -222,9 +182,6 @@ public class Server implements Runnable {
                         userManager.updateUserChatRoom(clientUsername, currentRoom.getChatRoomName());
                         currentRoom.removeUserFromChatRoom(this);
                     }
-
-                    // Se a conexão cair inesperadamente, marcar o usuário como inativo
-                    // para permitir que ele faça login novamente
                     userManager.markUserInactive(clientUsername);
                 }
 
@@ -239,23 +196,17 @@ public class Server implements Runnable {
             String username = userManager.validateToken(tokenString);
             if (username != null) {
                 clientUsername = username;
-
-                // Register this connection as the active one for this token
                 sessionsLock.writeLock().lock();
                 try {
-                    // If there was a previous connection with this token, disconnect it
-                    ConnectionHandler existingHandler = activeSessionsByToken.get(tokenString);
-                    if (existingHandler != null && existingHandler != this) {
-                        existingHandler.sendMessage("Your session has been resumed from another location.");
-                        existingHandler.shutdown();
+                    ConnectionHandler existing = activeSessionsByToken.get(tokenString);
+                    if (existing != null && existing != this) {
+                        existing.sendMessage("Your session has been resumed from another location.");
+                        existing.shutdown();
                     }
-
                     activeSessionsByToken.put(tokenString, this);
                 } finally {
                     sessionsLock.writeLock().unlock();
                 }
-
-                // Garantir que o usuário seja marcado como ativo
                 userManager.markUserActive(username);
                 return true;
             }
@@ -264,19 +215,14 @@ public class Server implements Runnable {
 
         private void processMessage(String messageFromClient) {
             try {
-                if (messageFromClient.equalsIgnoreCase("/quit")) {
-                    if (currentRoom != null) {
-                        currentRoom.removeUserFromChatRoom(this);
-                    }
-
+                if ("/quit".equalsIgnoreCase(messageFromClient)) {
+                    if (currentRoom != null) currentRoom.removeUserFromChatRoom(this);
                     connectionsLock.writeLock().lock();
                     try {
                         connections.remove(this);
                     } finally {
                         connectionsLock.writeLock().unlock();
                     }
-
-                    // Clean up token when user deliberately quits
                     if (authToken != null) {
                         sessionsLock.writeLock().lock();
                         try {
@@ -286,21 +232,15 @@ public class Server implements Runnable {
                         }
                         userManager.invalidateToken(authToken.getTokenString());
                     }
-
-                    // Marcar usuário como inativo ao sair
                     userManager.markUserInactive(clientUsername);
-
                     shutdown();
-                }
-                else if (messageFromClient.startsWith("/token")) {
-                    // Client should not manually request tokens this way
+
+                } else if (messageFromClient.startsWith("/token")) {
                     sendMessage("Token management is handled automatically by the server.");
-                }
-                else if (messageFromClient.equals("/refresh_token")) {
-                    // Generate a new token for the user
+
+                } else if ("/refresh_token".equals(messageFromClient)) {
                     TokenManager newToken = userManager.generateToken(clientUsername);
                     if (newToken != null) {
-                        // Update session mapping
                         sessionsLock.writeLock().lock();
                         try {
                             if (authToken != null) {
@@ -310,15 +250,14 @@ public class Server implements Runnable {
                         } finally {
                             sessionsLock.writeLock().unlock();
                         }
-
                         authToken = newToken;
                         sendMessage("AUTH_TOKEN:" + newToken.getTokenString());
                         sendMessage("Token refreshed. New token will expire in " + newToken.getSecondsUntilExpiration() + " seconds.");
                     } else {
                         sendMessage("Failed to refresh token.");
                     }
-                }
-                else if (messageFromClient.equalsIgnoreCase("/leave")) {
+
+                } else if ("/leave".equals(messageFromClient)) {
                     if (currentRoom != null) {
                         ChatRoom roomToLeave = currentRoom;
                         currentRoom.removeUserFromChatRoom(this);
@@ -329,35 +268,28 @@ public class Server implements Runnable {
                     } else {
                         sendMessage("You're not in any chat room.");
                     }
-                }
-                else if (messageFromClient.startsWith("/join")) {
-                    String chatRoomName = messageFromClient.substring(6).trim();
 
-                    if (chatRoomName.isEmpty()) {
+                } else if (messageFromClient.startsWith("/join")) {
+                    String roomName = messageFromClient.substring(6).trim();
+                    if (roomName.isEmpty()) {
                         sendMessage("Please provide a room name: /join [room name]");
                         return;
                     }
 
                     ChatRoom chatRoomToJoin;
                     boolean isNewRoom = false;
-                    chatRoomsLock.readLock().lock();
-                    try {
-                        chatRoomToJoin = chatRooms.get(chatRoomName);
 
+                    // Simplified: single write‐lock for lookup + create
+                    chatRoomsLock.writeLock().lock();
+                    try {
+                        chatRoomToJoin = chatRooms.get(roomName);
                         if (chatRoomToJoin == null) {
-                            chatRoomsLock.readLock().unlock();
-                            chatRoomsLock.writeLock().lock();
-                            try {
-                                chatRoomToJoin = new ChatRoom(chatRoomName);
-                                chatRooms.put(chatRoomName, chatRoomToJoin);
-                                isNewRoom = true;
-                            } finally {
-                                chatRoomsLock.writeLock().unlock();
-                                chatRoomsLock.readLock().lock();
-                            }
+                            chatRoomToJoin = new ChatRoom(roomName);
+                            chatRooms.put(roomName, chatRoomToJoin);
+                            isNewRoom = true;
                         }
                     } finally {
-                        chatRoomsLock.readLock().unlock();
+                        chatRoomsLock.writeLock().unlock();
                     }
 
                     if (currentRoom == chatRoomToJoin) {
@@ -371,30 +303,30 @@ public class Server implements Runnable {
                     }
 
                     if (isNewRoom) {
-                        sendMessage("Creating new chat room '" + chatRoomName + "'...");
+                        sendMessage("Creating new chat room '" + roomName + "'...");
                     }
 
                     currentRoom = chatRoomToJoin;
                     currentRoom.addUserToChatRoom(this);
-                    userManager.updateUserChatRoom(clientUsername, chatRoomName);
+                    userManager.updateUserChatRoom(clientUsername, roomName);
                 }
-                else if (messageFromClient.startsWith("/rooms")) {
+                else if ("/rooms".equals(messageFromClient)) {
                     chatRoomsLock.readLock().lock();
                     try {
                         if (chatRooms.isEmpty()) {
                             sendMessage("No chat rooms available. Use /join [roomname] to create one!");
                         } else {
                             sendMessage("Available chat rooms:");
-                            for (String roomName : chatRooms.keySet()) {
-                                ChatRoom room = chatRooms.get(roomName);
-                                sendMessage("-- " + roomName + " (" + room.getParticipantCount() + " users) --");
+                            for (String rn : chatRooms.keySet()) {
+                                ChatRoom room = chatRooms.get(rn);
+                                sendMessage("-- " + rn + " (" + room.getParticipantCount() + " users) --");
                             }
                         }
                     } finally {
                         chatRoomsLock.readLock().unlock();
                     }
-                }
-                else {
+
+                } else {
                     if (currentRoom == null) {
                         sendMessage("You are not in any chat room... use /rooms to see which rooms are available :)");
                     } else {
@@ -409,30 +341,23 @@ public class Server implements Runnable {
         private boolean authenticate() {
             final int MAX_ATTEMPTS = 3;
             int attempts = 0;
-
-            while (attempts < MAX_ATTEMPTS && !done) {
+            while (attempts < MAX_ATTEMPTS) {
                 try {
-                    // Primeiro envia a mensagem de erro se for tentativa subsequente
                     if (attempts > 0) {
                         sendMessage("Invalid credentials. Attempts remaining: " + (MAX_ATTEMPTS - attempts));
                     }
-
                     sendMessage("Enter your username:");
                     clientUsername = clientInput.readLine();
-
                     if (userManager.isUserActive(clientUsername)) {
                         sendMessage("This username is already in use. Please choose another username or try again later.");
                         continue;
                     }
-
                     sendMessage("Enter your password:");
                     clientPassword = clientInput.readLine();
-
                     if (userManager.authenticateUser(clientUsername, clientPassword)) {
                         authToken = userManager.generateToken(clientUsername);
                         if (authToken != null) {
                             sendMessage("AUTH_TOKEN:" + authToken.getTokenString());
-
                             sessionsLock.writeLock().lock();
                             try {
                                 activeSessionsByToken.put(authToken.getTokenString(), this);
@@ -449,7 +374,6 @@ public class Server implements Runnable {
                     return false;
                 }
             }
-
             sendMessage("Too many failed attempts. Disconnecting...");
             return false;
         }
@@ -464,21 +388,16 @@ public class Server implements Runnable {
 
         public void shutdown() {
             try {
-                clientInput.close();
-                clientOutput.close();
-
-                if (client != null && !client.isClosed()) {
-                    client.close();
-                }
-            }
-            catch (IOException e) {
+                if (clientInput != null) clientInput.close();
+                if (clientOutput != null) clientOutput.close();
+                if (client != null && !client.isClosed()) client.close();
+            } catch (IOException e) {
                 System.err.println("Error closing connection: " + e.getMessage());
             }
         }
     }
 
     public static void main(String[] args) {
-        Server server = new Server();
-        server.run();
+        new Server().run();
     }
 }

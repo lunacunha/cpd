@@ -1,26 +1,16 @@
+// UserManager.java
 import java.io.*;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.*;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
-import java.util.HashSet;
-import java.util.Set;
 
-/**
- * Manages user accounts and authentication for the chat system.
- * This class combines user storage, authentication and account management.
- * Enhanced with token-based authentication for fault tolerance.
- * Uses hashing for password storage.
- */
 public class UserManager {
     private static class User {
-        private String username;
-        private String passwordHash; // Agora armazena o hash da senha
+        private final String username;
+        private final String passwordHash;
         private TokenManager currentToken;
         private String currentChatRoom;
 
@@ -31,162 +21,102 @@ public class UserManager {
             this.currentChatRoom = null;
         }
 
-        public String getUsername() {
-            return username;
-        }
-
-        public String getPasswordHash() {
-            return passwordHash;
-        }
-
-        public boolean authenticate(String passwordHash) {
-            return this.passwordHash.equals(passwordHash);
-        }
-
-        public TokenManager getCurrentToken() {
-            return currentToken;
-        }
-
-        public void setCurrentToken(TokenManager token) {
-            this.currentToken = token;
-        }
-
-        public String getCurrentChatRoom() {
-            return currentChatRoom;
-        }
-
-        public void setCurrentChatRoom(String roomName) {
-            this.currentChatRoom = roomName;
-        }
+        public String getUsername() { return username; }
+        public String getPasswordHash() { return passwordHash; }
+        public boolean authenticate(String passwordHash) { return this.passwordHash.equals(passwordHash); }
+        public TokenManager getCurrentToken() { return currentToken; }
+        public void setCurrentToken(TokenManager token) { this.currentToken = token; }
+        public String getCurrentChatRoom() { return currentChatRoom; }
+        public void setCurrentChatRoom(String roomName) { this.currentChatRoom = roomName; }
     }
 
-    private Map<String, User> users = new HashMap<>();
-    private Map<String, String> tokenToUsername = new HashMap<>();
-
-    // Conjunto para rastrear usuários ativos (logados)
-    private Set<String> activeUsers = new HashSet<>();
-
+    private final Map<String, User> users = new HashMap<>();
+    private final Map<String, String> tokenToUsername = new HashMap<>();
+    private final Set<String> activeUsers = new HashSet<>();
     private final String USER_FILE = "users.txt";
-    private final ReadWriteLock usersLock = new ReentrantReadWriteLock();
-    private final ReadWriteLock tokensLock = new ReentrantReadWriteLock();
+    private final ReadWriteLock usersLock       = new ReentrantReadWriteLock();
+    private final ReadWriteLock tokensLock      = new ReentrantReadWriteLock();
     private final ReadWriteLock activeUsersLock = new ReentrantReadWriteLock();
-    private final ExecutorService threadPool;
 
     public UserManager() {
-        // Create a virtual thread per task executor
-        threadPool = Executors.newVirtualThreadPerTaskExecutor();
-        loadUsers();
-
-        // Start token cleanup task
-        threadPool.submit(this::cleanupExpiredTokens);
+        new Thread(this::loadUsers).start();
+        new Thread(this::cleanupExpiredTokens).start();
     }
 
-    /**
-     * Cria um hash SHA-256 da string fornecida
-     * @param input A string para ser transformada em hash
-     * @return String hash codificada em hexadecimal
-     */
     private String createHash(String input) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] hashBytes = digest.digest(input.getBytes(StandardCharsets.UTF_8));
-
-            // Converter bytes para string hexadecimal
-            StringBuilder hexString = new StringBuilder();
+            StringBuilder hex = new StringBuilder();
             for (byte b : hashBytes) {
-                String hex = Integer.toHexString(0xff & b);
-                if (hex.length() == 1) hexString.append('0');
-                hexString.append(hex);
+                String h = Integer.toHexString(0xff & b);
+                if (h.length() == 1) hex.append('0');
+                hex.append(h);
             }
-            return hexString.toString();
+            return hex.toString();
         } catch (NoSuchAlgorithmException e) {
-            System.err.println("Erro ao criar hash: " + e.getMessage());
-            // Fallback para casos onde o algoritmo não está disponível (não deveria acontecer com SHA-256)
+            System.err.println("Error creating hash: " + e.getMessage());
             return input;
         }
     }
 
-    // Load users from file
     private void loadUsers() {
-        threadPool.submit(() -> {
-            try {
-                File file = new File(USER_FILE);
-
-                if (!file.exists()) {
-                    createDefaultUsersFile();
-                }
-
-                BufferedReader reader = new BufferedReader(new FileReader(file));
-                String line;
-
+        try {
+            File file = new File(USER_FILE);
+            if (!file.exists()) createDefaultUsersFile();
+            try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
                 usersLock.writeLock().lock();
                 try {
+                    String line;
                     while ((line = reader.readLine()) != null) {
                         String[] parts = line.split(":");
                         if (parts.length == 2) {
-                            String username = parts[0];
-                            String passwordHash = parts[1]; // Já é hash no arquivo
-                            users.put(username, new User(username, passwordHash));
+                            users.put(parts[0], new User(parts[0], parts[1]));
                         }
                     }
                 } finally {
                     usersLock.writeLock().unlock();
                 }
-
-                reader.close();
-            } catch (IOException e) {
-                System.err.println("Error loading users: " + e.getMessage());
             }
-        });
+        } catch (IOException e) {
+            System.err.println("Error loading users: " + e.getMessage());
+        }
     }
 
-    // Create a default users file with hashed passwords
     private void createDefaultUsersFile() {
-        try {
-            PrintWriter writer = new PrintWriter(new FileWriter(USER_FILE));
-            // Armazenar senhas como hash
+        try (PrintWriter writer = new PrintWriter(new FileWriter(USER_FILE))) {
             writer.println("luna:" + createHash("password123"));
             writer.println("marta:" + createHash("password456"));
             writer.println("tiago:" + createHash("password789"));
-            writer.close();
             System.out.println("Default users file created with hashed passwords");
         } catch (IOException e) {
             System.err.println("Error creating default users file: " + e.getMessage());
         }
     }
 
-    // Save users to file
     public void saveUsers() {
-        // Use virtual thread to save users asynchronously
-        threadPool.submit(() -> {
+        new Thread(() -> {
             try {
-                Map<String, User> usersCopy = new HashMap<>();
-
+                Map<String, User> copy;
                 usersLock.readLock().lock();
                 try {
-                    usersCopy.putAll(users);
+                    copy = new HashMap<>(users);
                 } finally {
                     usersLock.readLock().unlock();
                 }
 
-                PrintWriter writer = new PrintWriter(new FileWriter(USER_FILE));
-                for (User user : usersCopy.values()) {
-                    writer.println(user.getUsername() + ":" + user.getPasswordHash());
+                try (PrintWriter w = new PrintWriter(new FileWriter(USER_FILE))) {
+                    for (User u : copy.values()) {
+                        w.println(u.getUsername() + ":" + u.getPasswordHash());
+                    }
                 }
-
-                writer.close();
-                System.out.println("Users saved: " + usersCopy.size());
+                System.out.println("Users saved: " + copy.size());
             } catch (IOException e) {
                 System.err.println("Error saving users: " + e.getMessage());
             }
-        });
+        }).start();
     }
 
-    /**
-     * Verifica se um usuário já está ativo (conectado)
-     * @param username Nome do usuário a verificar
-     * @return true se o usuário já estiver logado, false caso contrário
-     */
     public boolean isUserActive(String username) {
         activeUsersLock.readLock().lock();
         try {
@@ -196,10 +126,6 @@ public class UserManager {
         }
     }
 
-    /**
-     * Marca um usuário como ativo (logado)
-     * @param username Nome do usuário a marcar como ativo
-     */
     public void markUserActive(String username) {
         activeUsersLock.writeLock().lock();
         try {
@@ -210,10 +136,6 @@ public class UserManager {
         }
     }
 
-    /**
-     * Marca um usuário como inativo (deslogado)
-     * @param username Nome do usuário a marcar como inativo
-     */
     public void markUserInactive(String username) {
         activeUsersLock.writeLock().lock();
         try {
@@ -225,49 +147,36 @@ public class UserManager {
     }
 
     public boolean authenticateUser(String username, String password) {
-        String passwordHash = createHash(password);
-
-        // Verificar se o usuário já está logado
-        if (isUserActive(username)) {
-            return false; // Usuário já está logado
-        }
+        String hash = createHash(password);
+        if (isUserActive(username)) return false;
 
         usersLock.writeLock().lock();
         try {
-            User user = users.get(username);
-            if (user == null) {
-                // Novo usuário - criar conta
-                user = new User(username, passwordHash);
-                users.put(username, user);
-                threadPool.submit(this::saveUsers);
-
-                // Marcar como ativo
+            User u = users.get(username);
+            if (u == null) {
+                u = new User(username, hash);
+                users.put(username, u);
+                saveUsers();
                 markUserActive(username);
                 return true;
-            } else {
-                // Usuário existente - verificar senha
-                boolean authenticated = user.authenticate(passwordHash);
-                if (authenticated) {
-                    // Marcar como ativo somente se a autenticação for bem-sucedida
-                    markUserActive(username);
-                }
-                return authenticated;
+            } else if (u.authenticate(hash)) {
+                markUserActive(username);
+                return true;
             }
+            return false;
         } finally {
             usersLock.writeLock().unlock();
         }
     }
 
-    // Generate and store a token for authenticated user
     public TokenManager generateToken(String username) {
         TokenManager token = new TokenManager(username);
-
         usersLock.writeLock().lock();
         tokensLock.writeLock().lock();
         try {
-            User user = users.get(username);
-            if (user != null) {
-                user.setCurrentToken(token);
+            User u = users.get(username);
+            if (u != null) {
+                u.setCurrentToken(token);
                 tokenToUsername.put(token.getTokenString(), username);
                 return token;
             }
@@ -275,11 +184,9 @@ public class UserManager {
             tokensLock.writeLock().unlock();
             usersLock.writeLock().unlock();
         }
-
         return null;
     }
 
-    // Validate a token and return username if valid
     public String validateToken(String tokenString) {
         tokensLock.readLock().lock();
         try {
@@ -287,10 +194,10 @@ public class UserManager {
             if (username != null) {
                 usersLock.readLock().lock();
                 try {
-                    User user = users.get(username);
-                    if (user != null && user.getCurrentToken() != null &&
-                            user.getCurrentToken().getTokenString().equals(tokenString) &&
-                            !user.getCurrentToken().isExpired()) {
+                    User u = users.get(username);
+                    if (u != null && u.getCurrentToken() != null
+                            && u.getCurrentToken().getTokenString().equals(tokenString)
+                            && !u.getCurrentToken().isExpired()) {
                         return username;
                     }
                 } finally {
@@ -300,25 +207,21 @@ public class UserManager {
         } finally {
             tokensLock.readLock().unlock();
         }
-
         return null;
     }
 
-    // Invalidate a user's token and mark them as inactive
     public void invalidateToken(String tokenString) {
         tokensLock.writeLock().lock();
         try {
-            String username = tokenToUsername.remove(tokenString);
-            if (username != null) {
+            String user = tokenToUsername.remove(tokenString);
+            if (user != null) {
                 usersLock.writeLock().lock();
                 try {
-                    User user = users.get(username);
-                    if (user != null && user.getCurrentToken() != null &&
-                            user.getCurrentToken().getTokenString().equals(tokenString)) {
-                        user.setCurrentToken(null);
-
-                        // Marcar usuário como inativo ao invalidar token
-                        markUserInactive(username);
+                    User u = users.get(user);
+                    if (u != null && u.getCurrentToken() != null
+                            && u.getCurrentToken().getTokenString().equals(tokenString)) {
+                        u.setCurrentToken(null);
+                        markUserInactive(user);
                     }
                 } finally {
                     usersLock.writeLock().unlock();
@@ -329,78 +232,54 @@ public class UserManager {
         }
     }
 
-    // Update user's current chat room
     public void updateUserChatRoom(String username, String roomName) {
         usersLock.writeLock().lock();
         try {
-            User user = users.get(username);
-            if (user != null) {
-                user.setCurrentChatRoom(roomName);
-            }
+            User u = users.get(username);
+            if (u != null) u.setCurrentChatRoom(roomName);
         } finally {
             usersLock.writeLock().unlock();
         }
     }
 
-    // Get user's current chat room
     public String getUserCurrentChatRoom(String username) {
         usersLock.readLock().lock();
         try {
-            User user = users.get(username);
-            if (user != null) {
-                return user.getCurrentChatRoom();
-            }
+            User u = users.get(username);
+            return u != null ? u.getCurrentChatRoom() : null;
         } finally {
             usersLock.readLock().unlock();
         }
-        return null;
     }
 
-    // Periodically clean up expired tokens
     private void cleanupExpiredTokens() {
         while (true) {
             try {
-                // Check every minute
-                Thread.sleep(60 * 1000);
-
+                Thread.sleep(60_000);
                 tokensLock.writeLock().lock();
                 usersLock.writeLock().lock();
                 try {
-                    // Identify expired tokens
-                    Map<String, String> tokensCopy = new HashMap<>(tokenToUsername);
-                    for (Map.Entry<String, String> entry : tokensCopy.entrySet()) {
-                        String tokenString = entry.getKey();
-                        String username = entry.getValue();
-
-                        User user = users.get(username);
-                        if (user != null && user.getCurrentToken() != null &&
-                                user.getCurrentToken().getTokenString().equals(tokenString) &&
-                                user.getCurrentToken().isExpired()) {
-
-                            // Remove expired token
-                            tokenToUsername.remove(tokenString);
-                            user.setCurrentToken(null);
-
-                            // Marcar usuário como inativo quando token expirar
-                            markUserInactive(username);
-
-                            System.out.println("Expired token removed for user: " + username);
+                    for (Iterator<Map.Entry<String,String>> it = tokenToUsername.entrySet().iterator(); it.hasNext();) {
+                        Map.Entry<String,String> e = it.next();
+                        TokenManager tm = users.get(e.getValue()).getCurrentToken();
+                        if (tm != null && tm.getTokenString().equals(e.getKey()) && tm.isExpired()) {
+                            it.remove();
+                            users.get(e.getValue()).setCurrentToken(null);
+                            markUserInactive(e.getValue());
+                            System.out.println("Expired token removed for user: " + e.getValue());
                         }
                     }
                 } finally {
                     usersLock.writeLock().unlock();
                     tokensLock.writeLock().unlock();
                 }
-            } catch (InterruptedException e) {
-                System.err.println("Token cleanup interrupted: " + e.getMessage());
+            } catch (InterruptedException ex) {
+                System.err.println("Token cleanup interrupted");
                 break;
-            } catch (Exception e) {
-                System.err.println("Error in token cleanup: " + e.getMessage());
             }
         }
     }
 
-    // Check if a user exists
     public boolean userExists(String username) {
         usersLock.readLock().lock();
         try {

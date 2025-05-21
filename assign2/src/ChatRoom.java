@@ -1,24 +1,18 @@
-import java.io.IOException;
+// ChatRoom.java
 import java.util.*;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class ChatRoom {
 
-    private String chatRoomName;
+    private final String chatRoomName;
     private final Set<Server.ConnectionHandler> currentParticipants = new HashSet<>();
-    private List<String> previousMessages;
+    private final List<String> previousMessages = new ArrayList<>();
     private final ReadWriteLock participantsLock = new ReentrantReadWriteLock();
-    private final ReadWriteLock messagesLock = new ReentrantReadWriteLock();
-    private final ExecutorService threadPool;
+    private final ReadWriteLock messagesLock     = new ReentrantReadWriteLock();
 
     public ChatRoom(String chatRoomName) {
         this.chatRoomName = chatRoomName;
-        this.previousMessages = new ArrayList<>();
-        // Create a virtual thread per task executor
-        this.threadPool = Executors.newVirtualThreadPerTaskExecutor();
     }
 
     public String getChatRoomName() {
@@ -26,48 +20,46 @@ public class ChatRoom {
     }
 
     public void addUserToChatRoom(Server.ConnectionHandler user) {
+        // 1) add to set
+        participantsLock.writeLock().lock();
         try {
-            participantsLock.writeLock().lock();
-            try {
-                currentParticipants.add(user);
-            } finally {
-                participantsLock.writeLock().unlock();
-            }
-
-            final Server.ConnectionHandler finalUser = user;
-            threadPool.submit(() -> finalUser.sendMessage("You have joined the chat room: " + chatRoomName));
-
-            String joinMessage = "-- User " + user.getClientUserName() + " joined the chat room :) --";
-
-            threadPool.submit(() -> {
-                participantsLock.readLock().lock();
-                try {
-                    for (Server.ConnectionHandler participant : currentParticipants) {
-                        if (participant != user) {
-                            final Server.ConnectionHandler finalParticipant = participant;
-                            threadPool.submit(() -> finalParticipant.sendMessage(joinMessage));
-                        }
-                    }
-                } finally {
-                    participantsLock.readLock().unlock();
-                }
-            });
-
-            messagesLock.writeLock().lock();
-            try {
-                previousMessages.add(joinMessage);
-            } finally {
-                messagesLock.writeLock().unlock();
-            }
+            currentParticipants.add(user);
+        } finally {
+            participantsLock.writeLock().unlock();
         }
-        catch (Exception e) {
-            System.err.println("Error adding user to chat room: " + e.getMessage());
+
+        // 2) notify the new user
+        new Thread(() ->
+                user.sendMessage("You have joined the chat room: " + chatRoomName)
+        ).start();
+
+        // 3) broadcast join to others
+        String joinMessage = "-- User " + user.getClientUserName() + " joined the chat room :) --";
+        new Thread(() -> {
+            participantsLock.readLock().lock();
+            try {
+                for (Server.ConnectionHandler participant : currentParticipants) {
+                    if (participant != user) {
+                        new Thread(() -> participant.sendMessage(joinMessage)).start();
+                    }
+                }
+            } finally {
+                participantsLock.readLock().unlock();
+            }
+        }).start();
+
+        // 4) record history
+        messagesLock.writeLock().lock();
+        try {
+            previousMessages.add(joinMessage);
+        } finally {
+            messagesLock.writeLock().unlock();
         }
     }
 
     public void removeUserFromChatRoom(Server.ConnectionHandler user) {
-        boolean shouldBroadcast = false;
         String leaveMessage = null;
+        boolean shouldBroadcast = false;
 
         participantsLock.writeLock().lock();
         try {
@@ -86,34 +78,30 @@ public class ChatRoom {
             participantsLock.writeLock().unlock();
         }
 
-        if (shouldBroadcast) {
-            final String finalLeaveMessage = leaveMessage;
-            // Use virtual thread for broadcasting leave message
-            threadPool.submit(() -> broadcastMessage(finalLeaveMessage));
+        if (shouldBroadcast && leaveMessage != null) {
+            String msg = leaveMessage;
+            new Thread(() -> broadcastMessage(msg)).start();
         }
     }
 
     public void broadcastMessage(String message) {
-        // Use virtual thread for collecting participants and sending messages
-        threadPool.submit(() -> {
-            List<Server.ConnectionHandler> participantsCopy = new ArrayList<>();
-
+        // dispatch senders in background
+        new Thread(() -> {
+            List<Server.ConnectionHandler> snapshot = new ArrayList<>();
             participantsLock.readLock().lock();
             try {
-                participantsCopy.addAll(currentParticipants);
+                snapshot.addAll(currentParticipants);
             } finally {
                 participantsLock.readLock().unlock();
             }
-
-            // Send message to each participant in parallel using virtual threads
-            for (Server.ConnectionHandler user : participantsCopy) {
+            for (Server.ConnectionHandler user : snapshot) {
                 if (user != null) {
-                    final Server.ConnectionHandler finalUser = user;
-                    threadPool.submit(() -> finalUser.sendMessage(message));
+                    new Thread(() -> user.sendMessage(message)).start();
                 }
             }
-        });
+        }).start();
 
+        // unless it's a slash‐command, record it
         if (!message.startsWith("/")) {
             messagesLock.writeLock().lock();
             try {
