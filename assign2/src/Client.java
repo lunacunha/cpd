@@ -15,7 +15,9 @@ public class Client {
 
     public static void main(String[] args) throws Exception {
         BufferedReader console = new BufferedReader(new InputStreamReader(System.in));
-        System.out.print("Username> ");
+        System.out.println("=== Welcome :) ===");
+        System.out.println();
+        System.out.print("Enter your username: ");
         username = console.readLine().trim();
         sessionFile = Paths.get("session_" + username + ".token");
         if (Files.exists(sessionFile)) {
@@ -95,7 +97,7 @@ public class Client {
             System.err.println("WARNING: Unusual truststore type: " + trustStoreType);
         }
 
-        System.out.println("Using truststore: " + trustStore);
+        //System.out.println("Using truststore: " + trustStore);
     }
 
     private static boolean serverAvailable() {
@@ -111,7 +113,7 @@ public class Client {
     }
 
     private static void login(BufferedReader console, String user) throws Exception {
-        System.out.print("Password> ");
+        System.out.print("Enter your password: ");
         String pass = console.readLine().trim();
 
         SSLSocketFactory sf = (SSLSocketFactory) SSLSocketFactory.getDefault();
@@ -125,7 +127,7 @@ public class Client {
             if (resp != null && resp.startsWith("TOKEN ")) {
                 savedToken = resp.substring(6).trim();
                 Files.write(sessionFile, savedToken.getBytes());
-                System.out.println("Logged in. Token saved to " + sessionFile);
+                System.out.println("\nLogged in. Token saved to " + sessionFile + "\n");
             } else {
                 System.err.println("Login failed: " + resp);
                 System.exit(1);
@@ -212,6 +214,7 @@ public class Client {
     }
 
     private static void printHelp() {
+        System.out.println();
         System.out.println("Commands:");
         System.out.println("  /join <room>      — join or create a room");
         System.out.println("  /join AI:<room>   — join or create a room with chat bot");
@@ -219,5 +222,6 @@ public class Client {
         System.out.println("  /rooms            — list all rooms");
         System.out.println("  /quit             — exit client");
         System.out.println("  /help             — show this list");
+        System.out.println();
     }
 }

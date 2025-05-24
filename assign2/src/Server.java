@@ -110,14 +110,14 @@ public class Server {
 
     private class ConnectionHandler implements Runnable {
         private final SSLSocket sock;
-        private PrintWriter out;
+        private PrintWriter clientOutput;
 
         ConnectionHandler(SSLSocket sock) {
             this.sock = sock;
         }
 
-        private void send(String msg) {
-            out.println(msg);
+        private void sendMessage(String msg) {
+            clientOutput.println(msg);
         }
 
         @Override
@@ -127,7 +127,7 @@ public class Server {
                     BufferedReader in = new BufferedReader(new InputStreamReader(sock.getInputStream()));
                     PrintWriter writer = new PrintWriter(sock.getOutputStream(), true)
             ) {
-                this.out = writer;
+                this.clientOutput = writer;
                 String line = in.readLine();
                 if (line == null) return;
 
@@ -135,29 +135,29 @@ public class Server {
                 if (line.startsWith("/token ")) {
                     username = userManager.validateToken(line.substring(7).trim());
                     if (username != null) {
-                        send("RESUMED");
+                        sendMessage("Resumed session :)");
                     } else {
-                        send("TOKEN_INVALID");
+                        sendMessage("TOKEN_INVALID");
                         return;
                     }
                 } else if (line.startsWith("/login ")) {
                     String[] p = line.split(" ", 3);
                     var tm = userManager.authenticateOrRegister(p[1], p[2]);
                     if (tm == null) {
-                        send("AUTH_FAILED");
+                        sendMessage("AUTH_FAILED");
                         return;
                     }
                     username = p[1];
-                    send("TOKEN " + tm.getTokenString());
+                    sendMessage("TOKEN " + tm.getTokenString());
                 } else {
-                    send("INVALID_COMMAND");
+                    sendMessage("INVALID_COMMAND");
                     return;
                 }
 
                 // register active client
                 clientsLock.writeLock().lock();
                 try {
-                    activeClients.put(username, out);
+                    activeClients.put(username, clientOutput);
                 } finally {
                     clientsLock.writeLock().unlock();
                 }
@@ -168,7 +168,8 @@ public class Server {
                     ChatRoom srvRoom = getOrCreateRoom(prev.getChatRoomName());
                     srvRoom.addUser(username);
                     userManager.setRoom(username, srvRoom);
-                    send("-- you have rejoined the room " + srvRoom.getChatRoomName() + " --");
+                    sendMessage("-- You have rejoined the room " + srvRoom.getChatRoomName() + " --");
+                    System.out.println();
                 }
 
                 // --- Main loop ---
@@ -189,57 +190,66 @@ public class Server {
                         }
                         // leave old
                         ChatRoom old = userManager.getChatRoom(username);
-                        if (old != null) old.removeUser(username);
+                        if (old != null) {
+                            old.removeUser(username);
+                        }
                         // join new
                         room.addUser(username);
                         userManager.setRoom(username, room);
-                        send("-- you have joined the room " + room.getChatRoomName() + " --");
+                        System.out.println();
+                        sendMessage("-- You have joined the room " + room.getChatRoomName() + " --");
+                        System.out.println();
+
 
                     } else if (line.equals("/leave")) {
                         ChatRoom room = userManager.getChatRoom(username);
                         if (room == null) {
-                            send("NOT_IN_ROOM");
+                            sendMessage("You are not in any room. Type /rooms to see the available chat rooms :)");
                         } else {
                             room.removeUser(username);
                             userManager.setRoom(username, null);
-                            send("-- you have left the room " + room.getChatRoomName() + " --");
+                            System.out.println();
+                            sendMessage("-- You have left the room: " + room.getChatRoomName() + " --");
                         }
 
                     } else if (line.equals("/rooms")) {
                         roomsLock.readLock().lock();
                         try {
                             if (rooms.isEmpty()) {
-                                send("No rooms available");
+                                sendMessage("No rooms available");
                             } else {
-                                send("Available rooms: " + String.join(", ", rooms.keySet()));
+                                sendMessage("Available rooms:");
+                                for (String room : rooms.keySet()) {
+                                    sendMessage("-" + room + " -\n");
+                                }
                             }
                         } finally {
                             roomsLock.readLock().unlock();
                         }
 
                     } else if (line.equals("/help")) {
-                        send("Commands:");
-                        send("  /join <room>");
-                        send("  /join AI:<name>|<prompt>    (or AI:<name> for default AI)");
-                        send("  /leave");
-                        send("  /rooms");
-                        send("  /quit");
-                        send("  /help");
+                        sendMessage("Commands:");
+                        sendMessage("  /join <room>");
+                        sendMessage("  /join AI:<name>|<prompt>    (or AI:<name> for default AI)");
+                        sendMessage("  /leave");
+                        sendMessage("  /rooms");
+                        sendMessage("  /quit");
+                        sendMessage("  /help");
 
                     } else if (line.equals("/quit")) {
                         ChatRoom room = userManager.getChatRoom(username);
                         if (room != null) room.removeUser(username);
                         userManager.invalidateToken(username);
-                        send("Goodbye!");
+                        sendMessage("Goodbye!");
                         break;
 
                     } else if (line.startsWith("/")) {
-                        send("UNKNOWN_COMMAND");
+                        sendMessage("UNKNOWN_COMMAND");
 
                     } else {
                         ChatRoom room = userManager.getChatRoom(username);
                         if (room == null) {
-                            send("NOT_IN_ROOM");
+                            sendMessage("NOT_IN_ROOM");
                             continue;
                         }
                         String tagged = username + ": " + line;
@@ -290,7 +300,6 @@ public class Server {
         private String generateAIReply(ChatRoom room) {
             final String model = "llama3.2:1b";
 
-            // 1) Build the plain-text prompt
             StringBuilder prompt = new StringBuilder();
             prompt.append(room.getPrompt()).append("\n\n");
             for (String msg : room.getHistory()) {
@@ -298,7 +307,6 @@ public class Server {
             }
             prompt.append("Bot: ");
 
-            // 2) Helper to invoke ollama, merge stderr→stdout, send input, and capture all output
             BiFunction<List<String>, StringBuilder, String> runCommand = (cmd, input) -> {
                 try {
                     ProcessBuilder pb = new ProcessBuilder(cmd);
@@ -327,24 +335,19 @@ public class Server {
                 }
             };
 
-            // 3) Ensure the model is present (harmless if already pulled)
             String pullOut = runCommand.apply(
                     List.of("ollama", "pull", model),
                     new StringBuilder()
             );
             System.err.println("[ollama pull] " + pullOut.trim());
 
-            // 4) Run the model with our assembled prompt
             String runOut = runCommand.apply(
                     List.of("ollama", "run", model),
                     prompt
             );
 
-            // 5) Strip ANSI/control sequences and non-printables (except newline)
             String clean = runOut
-                    // remove ANSI CSI sequences like ESC[?2026h or ESC[1m
                     .replaceAll("\\u001B\\[[;?0-9]*[a-zA-Z]", "")
-                    // remove any other control characters except CR+LF
                     .replaceAll("[^\\x20-\\x7E\\r\\n]", "")
                     .trim();
 
