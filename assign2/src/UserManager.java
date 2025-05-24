@@ -1,4 +1,6 @@
 import java.io.*;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -11,7 +13,7 @@ public class UserManager {
         final String username;
         final String passwordHash;
         TokenManager token;
-        String room;
+        ChatRoom room;
 
         User(String u, String ph) {
             username = u;
@@ -21,7 +23,9 @@ public class UserManager {
     }
 
     private final Map<String, User> users = new HashMap<>();
+    private final Map<String, ChatRoom> roomsByName = new HashMap<>();
     private final ReadWriteLock lock = new ReentrantReadWriteLock();
+    private final ReadWriteLock roomsLock = new ReentrantReadWriteLock();
     private final String STATE_FILE = "user_state.txt";
     private final long TOKEN_LIFETIME = 60L * 60L * 24L * 7L; // one week
 
@@ -46,14 +50,23 @@ public class UserManager {
         }
     }
 
+    private ChatRoom getOrCreateRoom(String roomName) {
+        roomsLock.writeLock().lock();
+        try {
+            return roomsByName.computeIfAbsent(roomName, ChatRoom::new);
+        } finally {
+            roomsLock.writeLock().unlock();
+        }
+    }
+
     private void loadState() {
         File f = new File(STATE_FILE);
         if (!f.exists()) {
             try (PrintWriter w = new PrintWriter(new FileWriter(f))) {
                 String aHash = sha256("admin123");
-                w.printf("admin:%s:null:null%n", aHash);
+                w.printf("admin:%s:null:null:null%n", aHash);
                 String gHash = sha256("guest123");
-                w.printf("guest:%s:null:null%n", gHash);
+                w.printf("guest:%s:null:null:null%n", gHash);
                 System.out.println("Initialized " + STATE_FILE + " with default users");
             } catch (IOException e) {
                 System.err.println("Could not create " + STATE_FILE + ": " + e.getMessage());
@@ -67,7 +80,7 @@ public class UserManager {
                 while ((line = r.readLine()) != null) {
                     line = line.trim();
                     if (line.isEmpty() || line.startsWith("#")) continue;
-                    // format: user:passwordHash:tokenString:expiryEpoch:room
+                    // format: user:passwordHash:tokenString:expiryEpoch:roomName
                     String[] p = line.split(":", 5);
                     if (p.length != 5) {
                         System.err.println("Skipping invalid state line: " + line);
@@ -82,7 +95,9 @@ public class UserManager {
                         }
                     }
                     // room
-                    u.room = "null".equals(p[4]) ? null : p[4];
+                    if (!"null".equals(p[4]) && !p[4].isEmpty()) {
+                        u.room = getOrCreateRoom(p[4]);
+                    }
                     users.put(u.username, u);
                 }
                 System.out.println("Loaded " + users.size() + " users from " + STATE_FILE);
@@ -95,9 +110,26 @@ public class UserManager {
     }
 
     private TokenManager createTokenFromParts(String tokenString, long expiryEpoch) {
-        // same reflection trick as before...
-        /* ... */
-        return null; // implement as before
+        try {
+            // Use reflection to create TokenManager with specific token and expiry
+            Constructor<TokenManager> constructor = TokenManager.class.getDeclaredConstructor(long.class);
+            TokenManager tm = constructor.newInstance(0L); // Create with 0 seconds (will be overridden)
+
+            // Override the tokenString field
+            Field tokenField = TokenManager.class.getDeclaredField("tokenString");
+            tokenField.setAccessible(true);
+            tokenField.set(tm, tokenString);
+
+            // Override the expiresAt field
+            Field expiresAtField = TokenManager.class.getDeclaredField("expiresAt");
+            expiresAtField.setAccessible(true);
+            expiresAtField.set(tm, Instant.ofEpochSecond(expiryEpoch));
+
+            return tm;
+        } catch (Exception e) {
+            System.err.println("Error creating token from parts: " + e.getMessage());
+            return null;
+        }
     }
 
     public void saveState() {
@@ -107,14 +139,22 @@ public class UserManager {
                 String tok = (u.token == null ? "null" : u.token.getTokenString());
                 long expSec = 0;
                 if (u.token != null) {
-                    // reflection to pull expiry
+                    try {
+                        Field expiresAtField = TokenManager.class.getDeclaredField("expiresAt");
+                        expiresAtField.setAccessible(true);
+                        Instant expiresAt = (Instant) expiresAtField.get(u.token);
+                        expSec = expiresAt.getEpochSecond();
+                    } catch (Exception e) {
+                        System.err.println("Error getting token expiry: " + e.getMessage());
+                    }
                 }
+                String roomName = (u.room == null ? "null" : u.room.getChatRoomName());
                 w.printf("%s:%s:%s:%d:%s%n",
                         u.username,
                         u.passwordHash,
                         tok,
                         expSec,
-                        (u.room == null ? "null" : u.room)
+                        roomName
                 );
             }
         } catch (IOException e) {
@@ -177,17 +217,20 @@ public class UserManager {
         return null;
     }
 
-    public void setRoom(String user, String room) {
+    public void setRoom(String user, ChatRoom room) {
         lock.writeLock().lock();
         try {
             User u = users.get(user);
-            if (u != null) u.room = room;
+            if (u != null) {
+                u.room = room;
+                saveState();
+            }
         } finally {
             lock.writeLock().unlock();
         }
     }
 
-    public String getChatRoom(String user) {
+    public ChatRoom getChatRoom(String user) {
         lock.readLock().lock();
         try {
             User u = users.get(user);

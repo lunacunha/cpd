@@ -50,7 +50,6 @@ public class Server {
             this.sock = sock;
         }
 
-        // Novo método para enviar mensagens ao cliente
         public void sendMessage(String message) {
             if (clientOutput != null) {
                 clientOutput.println(message);
@@ -63,7 +62,6 @@ public class Server {
             try (BufferedReader in = new BufferedReader(new InputStreamReader(sock.getInputStream()));
                  PrintWriter out = new PrintWriter(sock.getOutputStream(), true)) {
 
-                // Armazena o PrintWriter para uso em sendMessage()
                 this.clientOutput = out;
 
                 String line = in.readLine();
@@ -103,34 +101,28 @@ public class Server {
                 }
 
                 // If they were already in a room, tell them
-                String curRoom = userManager.getChatRoom(username);
-                if (curRoom != null) {
-                    sendMessage("JOINED " + curRoom);
+                ChatRoom currentRoom = userManager.getChatRoom(username);
+                if (currentRoom != null) {
+                    sendMessage("JOINED " + currentRoom.getChatRoomName());
                 }
 
                 // Main loop
                 while ((line = in.readLine()) != null) {
                     if (line.startsWith("/join ")) {
-                        String newRoom = line.substring(6).trim();
-                        // create if needed
-                        roomsLock.writeLock().lock();
-                        try {
-                            rooms.computeIfAbsent(newRoom, ChatRoom::new);
-                        } finally {
-                            roomsLock.writeLock().unlock();
-                        }
-                        userManager.setRoom(username, newRoom);
-                        sendMessage("JOINED " + newRoom);
-                        System.err.println(username + " joined " + newRoom);
+                        String roomName = line.substring(6).trim();
+                        ChatRoom room = getOrCreateRoom(roomName);
+                        userManager.setRoom(username, room);
+                        sendMessage("JOINED " + room.getChatRoomName());
+                        System.err.println(username + " joined " + room.getChatRoomName());
 
                     } else if (line.equals("/leave")) {
-                        String room = userManager.getChatRoom(username);
+                        ChatRoom room = userManager.getChatRoom(username);
                         if (room == null) {
                             sendMessage("NOT_IN_ROOM");
                         } else {
                             userManager.setRoom(username, null);
-                            sendMessage("LEFT " + room);
-                            System.err.println(username + " left room " + room);
+                            sendMessage("LEFT " + room.getChatRoomName());
+                            System.err.println(username + " left room " + room.getChatRoomName());
                         }
 
                     } else if (line.equals("/rooms")) {
@@ -162,7 +154,7 @@ public class Server {
                         sendMessage("UNKNOWN_COMMAND");
 
                     } else {
-                        String room = userManager.getChatRoom(username);
+                        ChatRoom room = userManager.getChatRoom(username);
                         if (room == null) {
                             sendMessage("NOT_IN_ROOM");
                         } else {
@@ -189,13 +181,22 @@ public class Server {
         }
     }
 
+    private ChatRoom getOrCreateRoom(String roomName) {
+        roomsLock.writeLock().lock();
+        try {
+            return rooms.computeIfAbsent(roomName, ChatRoom::new);
+        } finally {
+            roomsLock.writeLock().unlock();
+        }
+    }
 
-    private void broadcast(String room, String msg) {
+    private void broadcast(ChatRoom room, String msg) {
         List<PrintWriter> targets = new ArrayList<>();
         clientsLock.readLock().lock();
         try {
             for (var e : activeClients.entrySet()) {
-                if (room.equals(userManager.getChatRoom(e.getKey()))) {
+                ChatRoom userRoom = userManager.getChatRoom(e.getKey());
+                if (room.equals(userRoom)) {
                     targets.add(e.getValue());
                 }
             }
