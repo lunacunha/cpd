@@ -225,15 +225,19 @@ public class Server {
                                 sendMessage("No rooms available");
                             } else {
                                 sendMessage("Available rooms:");
-                                for (String room : rooms.keySet()) {
-                                    sendMessage("-" + room + " -\n");
+                                // Iterate over ChatRoom objects so we can get the user count
+                                for (ChatRoom room : rooms.values()) {
+                                    sendMessage(String.format("- %s (%d users)",
+                                            room.getChatRoomName(),
+                                            room.getUserCount()
+                                    ));
                                 }
                             }
                         } finally {
                             roomsLock.readLock().unlock();
                         }
-
-                    } else if (line.equals("/help")) {
+                    }
+                    else if (line.equals("/help")) {
                         sendMessage("Commands:");
                         sendMessage("  /join <room>");
                         sendMessage("  /join AI:<name>|<prompt>    (or AI:<name> for default AI)");

@@ -68,6 +68,16 @@ public class ChatRoom {
         }
     }
 
+    // New method to return current user count
+    public int getUserCount() {
+        lock.readLock().lock();
+        try {
+            return users.size();
+        } finally {
+            lock.readLock().unlock();
+        }
+    }
+
     public void addMessage(String message) {
         lock.writeLock().lock();
         try {
