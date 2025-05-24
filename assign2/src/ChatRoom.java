@@ -1,5 +1,6 @@
 import java.util.*;
-import java.util.concurrent.locks.*;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class ChatRoom {
     private final String chatRoomName;
