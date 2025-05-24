@@ -1,153 +1,207 @@
-// Client.java
-import java.net.*;
+import javax.net.ssl.*;
 import java.io.*;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.net.SocketException;
+import java.nio.file.*;
 
-public class Client implements Runnable {
+public class Client {
+    private static String username;
+    private static String savedToken = null;
+    // Will become session_<username>.token once username is known
+    private static Path sessionFile;
+    private static final int MAX_RECONNECT_ATTEMPTS = 5;
+    private static final int RECONNECT_DELAY_MS = 2000;
+    private static final String SERVER_HOST = "localhost";
+    private static final int SERVER_PORT = 9999;
 
-    private Socket client;
-    private BufferedReader clientInput;
-    private PrintWriter clientOutput;
-    private final AtomicBoolean done = new AtomicBoolean(false);
+    private static volatile boolean done;
+    private static volatile boolean quit;
 
-    private String username, password, authToken;
-    private boolean authenticated = false;
-    private int maxReconnectAttempts = 5;
-    private long reconnectDelay    = 2000; // ms
+    public static void main(String[] args) throws Exception {
+        BufferedReader console = new BufferedReader(new InputStreamReader(System.in));
 
-    @Override
-    public void run() {
-        try {
-            connectToServer();
-            while (!done.get()) {
-                Thread.sleep(1000);
-            }
-        } catch (IOException e) {
-            System.err.println("Initial connection failed: " + e.getMessage());
-            shutdown();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            shutdown();
+        // 1) Prompt for username up-front
+        System.out.print("Username> ");
+        username = console.readLine().trim();
+        // 2) Determine per-user token file
+        sessionFile = Paths.get("session_" + username + ".token");
+
+        // 3) Load existing token (if any) for that user
+        if (Files.exists(sessionFile)) {
+            savedToken = new String(Files.readAllBytes(sessionFile)).trim();
         }
-    }
 
-    private void connectToServer() throws IOException {
-        client = new Socket("127.0.0.1", 9999);
-        clientOutput = new PrintWriter(client.getOutputStream(), true);
-        clientInput  = new BufferedReader(new InputStreamReader(client.getInputStream()));
-
-        // 1) input handler
-        new Thread(new InputHandler()).start();
-
-        // 2) server message reader
-        new Thread(this::receiveMessages).start();
-    }
-
-    private void receiveMessages() {
-        try {
-            String line;
-            while (!done.get() && (line = clientInput.readLine()) != null) {
-                final String message = line;
-                if (message.startsWith("AUTH_TOKEN:")) {
-                    authToken     = message.substring("AUTH_TOKEN:".length());
-                    System.out.println("Authenticated, token valid for 30 min.");
-                    authenticated = true;
-                } else {
-                    System.out.println(message);
-                }
-            }
-        } catch (IOException e) {
-            if (!done.get()) {
-                System.err.println("Connection lost. Reconnecting...");
-                handleReconnection();
-            }
+        // SSL truststore setup (unchanged)
+        File truststore = new File("truststore.jks");
+        if (!truststore.exists()) {
+            System.err.println("ERROR: truststore.jks not found. Generate it first.");
+            System.exit(1);
         }
-    }
+        System.setProperty("javax.net.ssl.trustStore", "truststore.jks");
+        System.setProperty("javax.net.ssl.trustStorePassword", "changeit");
+        System.setProperty("javax.net.ssl.trustStoreType", "JKS");
 
-    private void handleReconnection() {
-        if (done.get()) return;
-        int attempts = 0;
-        boolean reconnected = false;
+        // Verify server is reachable before proceeding
+        if (!serverAvailable()) {
+            System.err.printf("ERROR: Cannot connect to server at %s:%d%n", SERVER_HOST, SERVER_PORT);
+            System.exit(1);
+        }
 
-        while (!done.get() && attempts < maxReconnectAttempts && !reconnected) {
+        // 4) If we didn't load a token, do a one‐time login (supplies both user & pass)
+        if (savedToken == null) {
+            login(console, username);
+        }
+
+        // 5) Main loop: connect, chat, auto-reconnect (exactly as before)
+        while (true) {
             try {
-                attempts++;
-                System.out.println("Reconnect attempt " + attempts);
-                if (client != null) client.close();
-                Thread.sleep(reconnectDelay);
-                client = new Socket("127.0.0.1", 9999);
-                clientOutput = new PrintWriter(client.getOutputStream(), true);
-                clientInput  = new BufferedReader(new InputStreamReader(client.getInputStream()));
-
-                if (authenticated && authToken != null) {
-                    clientOutput.println("/token " + authToken);
-                    String resp = clientInput.readLine();
-                    if (resp != null && resp.contains("resumed")) {
-                        System.out.println("Session resumed.");
-                        reconnected = true;
-                        new Thread(this::receiveMessages).start();
-                    } else {
-                        System.out.println("Token expired.");
-                        authenticated = false;
-                        authToken = null;
-                    }
-                } else {
-                    System.out.println("Reconnected; please log in again.");
-                    reconnected = true;
-                    new Thread(this::receiveMessages).start();
-                }
-            } catch (IOException | InterruptedException e) {
-                System.err.println("Reconnect failed: " + e.getMessage());
-            }
-        }
-
-        if (!reconnected && !done.get()) {
-            System.err.println("Unable after " + maxReconnectAttempts + " attempts. Exiting.");
-            shutdown();
-        }
-    }
-
-    public void shutdown() {
-        done.set(true);
-        try {
-            if (clientInput  != null) clientInput.close();
-            if (clientOutput != null) clientOutput.close();
-            if (client != null && !client.isClosed()) client.close();
-        } catch (IOException ignored) {}
-        System.exit(0);
-    }
-
-    class InputHandler implements Runnable {
-        @Override
-        public void run() {
-            try {
-                BufferedReader console = new BufferedReader(new InputStreamReader(System.in));
-                System.out.println("Welcome! :)");
-                String msg;
-                while (!done.get() && (msg = console.readLine()) != null) {
-                    if ("/quit".equals(msg)) {
-                        System.out.println("Disconnecting...");
-                        clientOutput.println("/quit");
-                        console.close();
-                        shutdown();
+                if (connectAndChat(console)) break;
+            } catch (Exception e) {
+                System.err.println("Connection dropped: " + e.getMessage());
+                System.out.println("Reconnecting...");
+                boolean ok = false;
+                for (int i = 1; i <= MAX_RECONNECT_ATTEMPTS; i++) {
+                    try {
+                        Thread.sleep(RECONNECT_DELAY_MS);
+                        System.out.println("Attempt " + i + "...");
+                        if (connectAndChat(console)) System.exit(0);
+                        ok = true;
                         break;
-                    } else {
-                        final String toSend = msg;
-                        new Thread(() -> {
-                            if (clientOutput != null) {
-                                clientOutput.println(toSend);
-                            }
-                        }).start();
+                    } catch (Exception ex) {
+                        System.err.println("  failed: " + ex.getMessage());
                     }
                 }
-            } catch (IOException e) {
-                System.err.println("Input error: " + e.getMessage());
-                shutdown();
+                if (!ok) {
+                    System.err.println("Could not reconnect.");
+                    break;
+                }
             }
         }
     }
 
-    public static void main(String[] args) {
-        new Client().run();
+    private static boolean serverAvailable() {
+        try {
+            SSLSocketFactory sf = (SSLSocketFactory) SSLSocketFactory.getDefault();
+            try (SSLSocket sock = (SSLSocket) sf.createSocket(SERVER_HOST, SERVER_PORT)) {
+                configureSocket(sock);
+            }
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** Now takes username so it only asks for password. */
+    private static void login(BufferedReader console, String user) throws Exception {
+        System.out.print("Password> ");
+        String pass = console.readLine().trim();
+
+        SSLSocketFactory sf = (SSLSocketFactory) SSLSocketFactory.getDefault();
+        try (SSLSocket sock = (SSLSocket) sf.createSocket(SERVER_HOST, SERVER_PORT)) {
+            configureSocket(sock);
+            BufferedReader in = new BufferedReader(new InputStreamReader(sock.getInputStream()));
+            PrintWriter out = new PrintWriter(sock.getOutputStream(), true);
+
+            out.println("/login " + user + " " + pass);
+            String resp = in.readLine();
+            if (resp != null && resp.startsWith("TOKEN ")) {
+                savedToken = resp.substring(6).trim();
+                // save to user-specific file
+                Files.write(sessionFile, savedToken.getBytes());
+                System.out.println("Logged in. Token saved to " + sessionFile);
+            } else {
+                System.err.println("Login failed: " + resp);
+                System.exit(1);
+            }
+        }
+    }
+
+    private static boolean connectAndChat(BufferedReader console) throws Exception {
+        done = false;
+        quit = false;
+
+        SSLSocketFactory sf = (SSLSocketFactory) SSLSocketFactory.getDefault();
+        try (SSLSocket sock = (SSLSocket) sf.createSocket(SERVER_HOST, SERVER_PORT)) {
+            configureSocket(sock);
+            BufferedReader in = new BufferedReader(new InputStreamReader(sock.getInputStream()));
+            PrintWriter out = new PrintWriter(sock.getOutputStream(), true);
+
+            // send token
+            out.println("/token " + savedToken);
+            String welcome = in.readLine();
+            if (welcome == null || welcome.equals("TOKEN_INVALID")) {
+                System.err.println("Token invalid. Re-login.");
+                Files.deleteIfExists(sessionFile);
+                savedToken = null;
+                login(console, username);
+                return false;
+            }
+            System.out.println(welcome);
+
+            // reader thread (unchanged)
+            Thread reader = new Thread(() -> {
+                try {
+                    String line;
+                    while ((line = in.readLine()) != null) {
+                        System.out.println(line);
+                    }
+                } catch (IOException e) {
+                    if (!done) System.err.println("Disconnected from server.");
+                } finally {
+                    done = true;
+                }
+            });
+            reader.setDaemon(true);
+            reader.start();
+
+            // input loop (unchanged)
+            printHelp();
+            while (!done) {
+                if (!console.ready()) {
+                    Thread.sleep(100);
+                    continue;
+                }
+                String msg = console.readLine();
+                if (msg == null) continue;
+
+                switch (msg.trim()) {
+                    case "/help":
+                        printHelp();
+                        continue;
+                    case "/quit":
+                        out.println("/quit");
+                        Files.deleteIfExists(sessionFile);
+                        System.out.println("Session deleted and quit.");
+                        quit = true;
+                        break;
+                    default:
+                        out.println(msg);
+                        continue;
+                }
+                break;
+            }
+
+            done = true;
+            return quit;
+        }
+    }
+
+    private static void configureSocket(SSLSocket sock) throws SocketException {
+        sock.setEnabledProtocols(new String[]{"TLSv1.3", "TLSv1.2"});
+        sock.setEnabledCipherSuites(new String[]{
+                "TLS_AES_256_GCM_SHA384",
+                "TLS_AES_128_GCM_SHA256",
+                "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+                "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"
+        });
+        sock.setKeepAlive(true);
+    }
+
+    private static void printHelp() {
+        System.out.println("Commands:");
+        System.out.println("  /join <room>   — join or create a room");
+        System.out.println("  /leave         — leave current room");
+        System.out.println("  /rooms         — list all rooms");
+        System.out.println("  /quit          — exit client");
+        System.out.println("  /help          — show this list");
     }
 }
