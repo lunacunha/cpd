@@ -213,11 +213,11 @@ public class Client {
 
     private static void printHelp() {
         System.out.println("Commands:");
-        System.out.println("  /join <room>   — join or create a room");
+        System.out.println("  /join <room>      — join or create a room");
         System.out.println("  /join AI:<room>   — join or create a room with chat bot");
-        System.out.println("  /leave         — leave current room");
-        System.out.println("  /rooms         — list all rooms");
-        System.out.println("  /quit          — exit client");
-        System.out.println("  /help          — show this list");
+        System.out.println("  /leave            — leave current room");
+        System.out.println("  /rooms            — list all rooms");
+        System.out.println("  /quit             — exit client");
+        System.out.println("  /help             — show this list");
     }
 }
