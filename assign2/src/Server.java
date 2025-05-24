@@ -19,17 +19,13 @@ public class Server {
     private final ReadWriteLock clientsLock = new ReentrantReadWriteLock();
 
     public static void main(String[] args) throws Exception {
-        File ks = new File("server.jks");
-        if (!ks.exists()) {
-            System.err.println("ERROR: server.jks keystore not found!");
-            System.exit(1);
-        }
-        System.setProperty("javax.net.ssl.keyStore", "server.jks");
-        System.setProperty("javax.net.ssl.keyStorePassword", "changeit");
-        System.setProperty("javax.net.ssl.keyStoreType", "JKS");
+        // Validate TLS configuration
+        validateTLSConfiguration();
 
         SSLServerSocketFactory ssf = (SSLServerSocketFactory) SSLServerSocketFactory.getDefault();
         SSLServerSocket serverSocket = (SSLServerSocket) ssf.createServerSocket(PORT);
+
+        // Configure supported protocols and cipher suites
         serverSocket.setEnabledProtocols(new String[]{"TLSv1.3","TLSv1.2"});
         serverSocket.setEnabledCipherSuites(new String[]{
                 "TLS_AES_256_GCM_SHA384",
@@ -38,15 +34,52 @@ public class Server {
                 "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"
         });
 
-        System.err.println("Server listening on port " + PORT);
+        System.err.println("TLS Server listening on port " + PORT);
+        System.err.println("Using keystore: " + System.getProperty("javax.net.ssl.keyStore", "default"));
+
         Server srv = new Server();
         srv.userManager.setServer(srv);
 
         while (true) {
             SSLSocket sock = (SSLSocket) serverSocket.accept();
-            sock.setNeedClientAuth(false);
+            sock.setNeedClientAuth(false);  // Server-only authentication
             sock.setKeepAlive(true);
             new Thread(srv.new ConnectionHandler(sock)).start();
+        }
+    }
+
+    private static void validateTLSConfiguration() {
+        String keyStore = System.getProperty("javax.net.ssl.keyStore");
+        String keyStorePassword = System.getProperty("javax.net.ssl.keyStorePassword");
+
+        if (keyStore == null || keyStore.isEmpty()) {
+            System.err.println("ERROR: javax.net.ssl.keyStore system property not set!");
+            System.err.println("Usage: java -Djavax.net.ssl.keyStore=server.jks " +
+                    "-Djavax.net.ssl.keyStorePassword=<password> Server");
+            System.exit(1);
+        }
+
+        if (keyStorePassword == null || keyStorePassword.isEmpty()) {
+            System.err.println("ERROR: javax.net.ssl.keyStorePassword system property not set!");
+            System.err.println("Usage: java -Djavax.net.ssl.keyStore=server.jks " +
+                    "-Djavax.net.ssl.keyStorePassword=<password> Server");
+            System.exit(1);
+        }
+
+        File keystoreFile = new File(keyStore);
+        if (!keystoreFile.exists()) {
+            System.err.println("ERROR: Keystore file not found: " + keyStore);
+            System.err.println("Generate the keystore first using keytool:");
+            System.err.println("keytool -genkeypair -alias server -keyalg RSA -keysize 2048 " +
+                    "-validity 365 -keystore server.jks -storepass <password> " +
+                    "-keypass <password> -dname \"CN=localhost\"");
+            System.exit(1);
+        }
+
+        // Validate keystore type
+        String keyStoreType = System.getProperty("javax.net.ssl.keyStoreType", "JKS");
+        if (!keyStoreType.equals("JKS") && !keyStoreType.equals("PKCS12")) {
+            System.err.println("WARNING: Unusual keystore type: " + keyStoreType);
         }
     }
 

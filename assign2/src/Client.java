@@ -22,14 +22,8 @@ public class Client {
             savedToken = new String(Files.readAllBytes(sessionFile)).trim();
         }
 
-        File truststore = new File("truststore.jks");
-        if (!truststore.exists()) {
-            System.err.println("ERROR: truststore.jks not found. Generate it first.");
-            System.exit(1);
-        }
-        System.setProperty("javax.net.ssl.trustStore", "truststore.jks");
-        System.setProperty("javax.net.ssl.trustStorePassword", "changeit");
-        System.setProperty("javax.net.ssl.trustStoreType", "JKS");
+        // Validate TLS configuration
+        validateTLSConfiguration();
 
         if (!serverAvailable()) {
             System.err.printf("ERROR: Cannot connect to server at %s:%d%n", SERVER_HOST, SERVER_PORT);
@@ -64,6 +58,44 @@ public class Client {
                 }
             }
         }
+    }
+
+    private static void validateTLSConfiguration() {
+        String trustStore = System.getProperty("javax.net.ssl.trustStore");
+        String trustStorePassword = System.getProperty("javax.net.ssl.trustStorePassword");
+
+        if (trustStore == null || trustStore.isEmpty()) {
+            System.err.println("ERROR: javax.net.ssl.trustStore system property not set!");
+            System.err.println("Usage: java -Djavax.net.ssl.trustStore=truststore.jks " +
+                    "-Djavax.net.ssl.trustStorePassword=<password> Client");
+            System.exit(1);
+        }
+
+        if (trustStorePassword == null || trustStorePassword.isEmpty()) {
+            System.err.println("ERROR: javax.net.ssl.trustStorePassword system property not set!");
+            System.err.println("Usage: java -Djavax.net.ssl.trustStore=truststore.jks " +
+                    "-Djavax.net.ssl.trustStorePassword=<password> Client");
+            System.exit(1);
+        }
+
+        File truststoreFile = new File(trustStore);
+        if (!truststoreFile.exists()) {
+            System.err.println("ERROR: Truststore file not found: " + trustStore);
+            System.err.println("Generate the truststore first by exporting the server certificate:");
+            System.err.println("1. Export server certificate: keytool -exportcert -alias server " +
+                    "-keystore server.jks -storepass <server_password> -file server.crt");
+            System.err.println("2. Import into truststore: keytool -importcert -alias server " +
+                    "-file server.crt -keystore truststore.jks -storepass <trust_password>");
+            System.exit(1);
+        }
+
+        // Validate truststore type
+        String trustStoreType = System.getProperty("javax.net.ssl.trustStoreType", "JKS");
+        if (!trustStoreType.equals("JKS") && !trustStoreType.equals("PKCS12")) {
+            System.err.println("WARNING: Unusual truststore type: " + trustStoreType);
+        }
+
+        System.out.println("Using truststore: " + trustStore);
     }
 
     private static boolean serverAvailable() {
@@ -182,6 +214,7 @@ public class Client {
     private static void printHelp() {
         System.out.println("Commands:");
         System.out.println("  /join <room>   — join or create a room");
+        System.out.println("  /join AI:<room>   — join or create a room with chat bot");
         System.out.println("  /leave         — leave current room");
         System.out.println("  /rooms         — list all rooms");
         System.out.println("  /quit          — exit client");
