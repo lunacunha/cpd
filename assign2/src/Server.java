@@ -34,11 +34,22 @@ public class Server {
 
         System.err.println("Server listening on port " + PORT);
         Server srv = new Server();
+        // Pass the server instance to userManager so it can access rooms
+        srv.userManager.setServer(srv);
         while (true) {
             SSLSocket sock = (SSLSocket) serverSocket.accept();
             sock.setNeedClientAuth(false);
             sock.setKeepAlive(true);
             new Thread(srv.new ConnectionHandler(sock)).start();
+        }
+    }
+
+    public ChatRoom getOrCreateRoom(String roomName) {
+        roomsLock.writeLock().lock();
+        try {
+            return rooms.computeIfAbsent(roomName, ChatRoom::new);
+        } finally {
+            roomsLock.writeLock().unlock();
         }
     }
 
@@ -100,10 +111,17 @@ public class Server {
                     clientsLock.writeLock().unlock();
                 }
 
-                // If they were already in a room, tell them
-                ChatRoom currentRoom = userManager.getChatRoom(username);
-                if (currentRoom != null) {
-                    sendMessage("JOINED " + currentRoom.getChatRoomName());
+                // Check if user was in a room and rejoin them
+                ChatRoom savedRoom = userManager.getChatRoom(username);
+                if (savedRoom != null) {
+                    // Get or create the room on the server side
+                    ChatRoom serverRoom = getOrCreateRoom(savedRoom.getChatRoomName());
+                    // Add user back to the room
+                    serverRoom.addUser(username);
+                    // Update user's room reference to the server room instance
+                    userManager.setRoom(username, serverRoom);
+                    sendMessage("-- you have rejoined the room " + serverRoom.getChatRoomName() + " --");
+                    System.err.println(username + " rejoined " + serverRoom.getChatRoomName() + " after reconnection");
                 }
 
                 // Main loop
@@ -111,8 +129,17 @@ public class Server {
                     if (line.startsWith("/join ")) {
                         String roomName = line.substring(6).trim();
                         ChatRoom room = getOrCreateRoom(roomName);
+
+                        // Remove user from previous room if they were in one
+                        ChatRoom previousRoom = userManager.getChatRoom(username);
+                        if (previousRoom != null) {
+                            previousRoom.removeUser(username);
+                        }
+
+                        // Add user to new room
+                        room.addUser(username);
                         userManager.setRoom(username, room);
-                        sendMessage("JOINED " + room.getChatRoomName());
+                        sendMessage("-- you have joined the room " + room.getChatRoomName() + " --");
                         System.err.println(username + " joined " + room.getChatRoomName());
 
                     } else if (line.equals("/leave")) {
@@ -120,8 +147,9 @@ public class Server {
                         if (room == null) {
                             sendMessage("NOT_IN_ROOM");
                         } else {
+                            room.removeUser(username);
                             userManager.setRoom(username, null);
-                            sendMessage("LEFT " + room.getChatRoomName());
+                            sendMessage("-- you have left the room " + room.getChatRoomName() + " --");
                             System.err.println(username + " left room " + room.getChatRoomName());
                         }
 
@@ -129,9 +157,10 @@ public class Server {
                         roomsLock.readLock().lock();
                         try {
                             if (rooms.isEmpty()) {
-                                sendMessage("No rooms available.");
+                                sendMessage("No rooms available");
+                                sendMessage("use /join [room] to create one :)");
                             } else {
-                                sendMessage("Rooms: " + String.join(", ", rooms.keySet()));
+                                sendMessage("Available rooms: " + String.join(", ", rooms.keySet()));
                             }
                         } finally {
                             roomsLock.readLock().unlock();
@@ -146,12 +175,17 @@ public class Server {
                         sendMessage("  /help          — show this message");
 
                     } else if (line.equals("/quit")) {
+                        // Remove user from their room when they explicitly quit
+                        ChatRoom currentRoom = userManager.getChatRoom(username);
+                        if (currentRoom != null) {
+                            currentRoom.removeUser(username);
+                        }
                         userManager.invalidateToken(username);
-                        sendMessage("BYE");
+                        sendMessage("Goodbye!");
                         break;
 
                     } else if (line.startsWith("/")) {
-                        sendMessage("UNKNOWN_COMMAND");
+                        sendMessage("UNKNOWN_COMMAND. Type another command");
 
                     } else {
                         ChatRoom room = userManager.getChatRoom(username);
@@ -169,24 +203,17 @@ public class Server {
                 System.err.println("I/O error for " + username + ": " + ioe.getMessage());
             } finally {
                 if (username != null) {
+                    // DO NOT remove user from room on disconnect - they should stay for reconnection
+                    // Only remove from active clients list
                     clientsLock.writeLock().lock();
                     try {
                         activeClients.remove(username);
                     } finally {
                         clientsLock.writeLock().unlock();
                     }
-                    System.err.println("Cleaned up session for " + username);
+                    System.err.println("Cleaned up active session for " + username + " (room membership preserved)");
                 }
             }
-        }
-    }
-
-    private ChatRoom getOrCreateRoom(String roomName) {
-        roomsLock.writeLock().lock();
-        try {
-            return rooms.computeIfAbsent(roomName, ChatRoom::new);
-        } finally {
-            roomsLock.writeLock().unlock();
         }
     }
 
@@ -194,9 +221,10 @@ public class Server {
         List<PrintWriter> targets = new ArrayList<>();
         clientsLock.readLock().lock();
         try {
+            // Get all users in the room using the ChatRoom method
+            Set<String> roomUsers = room.getUsers();
             for (var e : activeClients.entrySet()) {
-                ChatRoom userRoom = userManager.getChatRoom(e.getKey());
-                if (room.equals(userRoom)) {
+                if (roomUsers.contains(e.getKey())) {
                     targets.add(e.getValue());
                 }
             }

@@ -15,23 +15,26 @@ public class UserManager {
         TokenManager token;
         ChatRoom room;
 
-        User(String u, String ph) {
-            username = u;
-            passwordHash = ph;
+        User(String name, String pass) {
+            username = name;
+            passwordHash = pass;
             room = null;
         }
     }
 
     private final Map<String, User> users = new HashMap<>();
-    private final Map<String, ChatRoom> roomsByName = new HashMap<>();
     private final ReadWriteLock lock = new ReentrantReadWriteLock();
-    private final ReadWriteLock roomsLock = new ReentrantReadWriteLock();
     private final String STATE_FILE = "user_state.txt";
     private final long TOKEN_LIFETIME = 60L * 60L * 24L * 7L; // one week
+    private Server server; // Reference to server for room coordination
 
     public UserManager() {
         loadState();
         Runtime.getRuntime().addShutdownHook(new Thread(this::saveState));
+    }
+
+    public void setServer(Server server) {
+        this.server = server;
     }
 
     private String sha256(String in) {
@@ -50,19 +53,10 @@ public class UserManager {
         }
     }
 
-    private ChatRoom getOrCreateRoom(String roomName) {
-        roomsLock.writeLock().lock();
-        try {
-            return roomsByName.computeIfAbsent(roomName, ChatRoom::new);
-        } finally {
-            roomsLock.writeLock().unlock();
-        }
-    }
-
     private void loadState() {
-        File f = new File(STATE_FILE);
-        if (!f.exists()) {
-            try (PrintWriter w = new PrintWriter(new FileWriter(f))) {
+        File stateFile = new File(STATE_FILE);
+        if (!stateFile.exists()) {
+            try (PrintWriter w = new PrintWriter(new FileWriter(stateFile))) {
                 String aHash = sha256("admin123");
                 w.printf("admin:%s:null:null:null%n", aHash);
                 String gHash = sha256("guest123");
@@ -72,7 +66,7 @@ public class UserManager {
                 System.err.println("Could not create " + STATE_FILE + ": " + e.getMessage());
             }
         }
-        try (BufferedReader r = new BufferedReader(new FileReader(f))) {
+        try (BufferedReader r = new BufferedReader(new FileReader(stateFile))) {
             String line;
             lock.writeLock().lock();
             try {
@@ -80,25 +74,26 @@ public class UserManager {
                 while ((line = r.readLine()) != null) {
                     line = line.trim();
                     if (line.isEmpty() || line.startsWith("#")) continue;
-                    // format: user:passwordHash:tokenString:expiryEpoch:roomName
+                    // format: username:passwordHash:tokenString:expiryEpoch:roomName
                     String[] p = line.split(":", 5);
                     if (p.length != 5) {
                         System.err.println("Skipping invalid state line: " + line);
                         continue;
                     }
-                    User u = new User(p[0], p[1]);
+                    User user = new User(p[0], p[1]);
                     // token
                     if (!"null".equals(p[2]) && !p[2].isEmpty()) {
                         long exp = Long.parseLong(p[3]);
                         if (exp > Instant.now().getEpochSecond()) {
-                            u.token = createTokenFromParts(p[2], exp);
+                            user.token = createTokenFromParts(p[2], exp);
                         }
                     }
-                    // room
+                    // room - create a placeholder room that will be resolved when server is available
                     if (!"null".equals(p[4]) && !p[4].isEmpty()) {
-                        u.room = getOrCreateRoom(p[4]);
+                        // Create a placeholder ChatRoom - this will be replaced with the actual server room when user reconnects
+                        user.room = new ChatRoom(p[4]);
                     }
-                    users.put(u.username, u);
+                    users.put(user.username, user);
                 }
                 System.out.println("Loaded " + users.size() + " users from " + STATE_FILE);
             } finally {
@@ -135,23 +130,23 @@ public class UserManager {
     public void saveState() {
         lock.readLock().lock();
         try (PrintWriter w = new PrintWriter(new FileWriter(STATE_FILE))) {
-            for (User u : users.values()) {
-                String tok = (u.token == null ? "null" : u.token.getTokenString());
+            for (User user : users.values()) {
+                String tok = (user.token == null ? "null" : user.token.getTokenString());
                 long expSec = 0;
-                if (u.token != null) {
+                if (user.token != null) {
                     try {
                         Field expiresAtField = TokenManager.class.getDeclaredField("expiresAt");
                         expiresAtField.setAccessible(true);
-                        Instant expiresAt = (Instant) expiresAtField.get(u.token);
+                        Instant expiresAt = (Instant) expiresAtField.get(user.token);
                         expSec = expiresAt.getEpochSecond();
                     } catch (Exception e) {
                         System.err.println("Error getting token expiry: " + e.getMessage());
                     }
                 }
-                String roomName = (u.room == null ? "null" : u.room.getChatRoomName());
+                String roomName = (user.room == null ? "null" : user.room.getChatRoomName());
                 w.printf("%s:%s:%s:%d:%s%n",
-                        u.username,
-                        u.passwordHash,
+                        user.username,
+                        user.passwordHash,
                         tok,
                         expSec,
                         roomName
@@ -194,6 +189,10 @@ public class UserManager {
             User u = users.get(user);
             if (u != null) {
                 u.token = null;
+                // Also clear room when explicitly invalidating token (user quit)
+                if (u.room != null) {
+                    u.room = null;
+                }
                 saveState();
             }
         } finally {
