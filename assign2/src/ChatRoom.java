@@ -3,59 +3,94 @@ import java.util.concurrent.locks.*;
 
 public class ChatRoom {
     private final String chatRoomName;
+    private final String prompt;      // null for non-AI rooms
+    private final boolean isAI;
     private final Set<String> users = new HashSet<>();
-    private final ReadWriteLock usersLock = new ReentrantReadWriteLock();
+    private final List<String> history = new ArrayList<>();
+    private final ReadWriteLock lock = new ReentrantReadWriteLock();
 
     public ChatRoom(String chatRoomName) {
+        this(chatRoomName, null);
+    }
+
+    public ChatRoom(String chatRoomName, String prompt) {
         this.chatRoomName = chatRoomName;
+        this.prompt = prompt;
+        this.isAI = prompt != null;
     }
 
     public String getChatRoomName() {
         return chatRoomName;
     }
 
+    public boolean isAI() {
+        return isAI;
+    }
+
+    public String getPrompt() {
+        return prompt;
+    }
+
     public void addUser(String username) {
-        usersLock.writeLock().lock();
+        lock.writeLock().lock();
         try {
             users.add(username);
         } finally {
-            usersLock.writeLock().unlock();
+            lock.writeLock().unlock();
         }
     }
 
     public void removeUser(String username) {
-        usersLock.writeLock().lock();
+        lock.writeLock().lock();
         try {
             users.remove(username);
         } finally {
-            usersLock.writeLock().unlock();
+            lock.writeLock().unlock();
         }
     }
 
     public boolean hasUser(String username) {
-        usersLock.readLock().lock();
+        lock.readLock().lock();
         try {
             return users.contains(username);
         } finally {
-            usersLock.readLock().unlock();
+            lock.readLock().unlock();
         }
     }
 
     public Set<String> getUsers() {
-        usersLock.readLock().lock();
+        lock.readLock().lock();
         try {
             return new HashSet<>(users);
         } finally {
-            usersLock.readLock().unlock();
+            lock.readLock().unlock();
+        }
+    }
+
+    public void addMessage(String message) {
+        lock.writeLock().lock();
+        try {
+            history.add(message);
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+
+    public List<String> getHistory() {
+        lock.readLock().lock();
+        try {
+            return new ArrayList<>(history);
+        } finally {
+            lock.readLock().unlock();
         }
     }
 
     public boolean isEmpty() {
-        usersLock.readLock().lock();
+        lock.readLock().lock();
         try {
             return users.isEmpty();
         } finally {
-            usersLock.readLock().unlock();
+            lock.readLock().unlock();
         }
     }
 

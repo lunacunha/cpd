@@ -3,9 +3,15 @@ import java.io.*;
 import java.net.SocketException;
 import java.util.*;
 import java.util.concurrent.locks.*;
+import java.util.function.BiFunction;
 
 public class Server {
     private static final int PORT = 9999;
+
+    // default prompt when user omits one
+    private static final String DEFAULT_AI_PROMPT =
+            "You are a helpful AI assistant. Keep track of the conversation and respond concisely.";
+
     private final Map<String, ChatRoom> rooms = new HashMap<>();
     private final ReadWriteLock roomsLock = new ReentrantReadWriteLock();
     private final UserManager userManager = new UserManager();
@@ -34,8 +40,8 @@ public class Server {
 
         System.err.println("Server listening on port " + PORT);
         Server srv = new Server();
-        // Pass the server instance to userManager so it can access rooms
         srv.userManager.setServer(srv);
+
         while (true) {
             SSLSocket sock = (SSLSocket) serverSocket.accept();
             sock.setNeedClientAuth(false);
@@ -44,10 +50,26 @@ public class Server {
         }
     }
 
-    public ChatRoom getOrCreateRoom(String roomName) {
+    public ChatRoom getOrCreateRoom(String name) {
         roomsLock.writeLock().lock();
         try {
-            return rooms.computeIfAbsent(roomName, ChatRoom::new);
+            return rooms.computeIfAbsent(name, ChatRoom::new);
+        } finally {
+            roomsLock.writeLock().unlock();
+        }
+    }
+
+    public ChatRoom getOrCreateAIRoom(String name, String prompt) {
+        roomsLock.writeLock().lock();
+        try {
+            return rooms.compute(name, (rn, existing) -> {
+                if (existing == null || !existing.isAI()) {
+                    return new ChatRoom(rn, prompt);
+                } else {
+                    // already AI room: leave prompt unchanged
+                    return existing;
+                }
+            });
         } finally {
             roomsLock.writeLock().unlock();
         }
@@ -55,55 +77,51 @@ public class Server {
 
     private class ConnectionHandler implements Runnable {
         private final SSLSocket sock;
-        private PrintWriter clientOutput;
+        private PrintWriter out;
 
         ConnectionHandler(SSLSocket sock) {
             this.sock = sock;
         }
 
-        public void sendMessage(String message) {
-            if (clientOutput != null) {
-                clientOutput.println(message);
-            }
+        private void send(String msg) {
+            out.println(msg);
         }
 
         @Override
         public void run() {
             String username = null;
-            try (BufferedReader in = new BufferedReader(new InputStreamReader(sock.getInputStream()));
-                 PrintWriter out = new PrintWriter(sock.getOutputStream(), true)) {
-
-                this.clientOutput = out;
-
+            try (
+                    BufferedReader in = new BufferedReader(new InputStreamReader(sock.getInputStream()));
+                    PrintWriter writer = new PrintWriter(sock.getOutputStream(), true)
+            ) {
+                this.out = writer;
                 String line = in.readLine();
                 if (line == null) return;
 
-                // Authenticate or resume
+                // --- Authentication ---
                 if (line.startsWith("/token ")) {
                     username = userManager.validateToken(line.substring(7).trim());
                     if (username != null) {
-                        sendMessage("RESUMED");
-                        System.err.println(username + " resumed session");
+                        send("RESUMED");
                     } else {
-                        sendMessage("TOKEN_INVALID");
+                        send("TOKEN_INVALID");
                         return;
                     }
                 } else if (line.startsWith("/login ")) {
                     String[] p = line.split(" ", 3);
-                    TokenManager tm = userManager.authenticateOrRegister(p[1], p[2]);
+                    var tm = userManager.authenticateOrRegister(p[1], p[2]);
                     if (tm == null) {
-                        sendMessage("AUTH_FAILED");
+                        send("AUTH_FAILED");
                         return;
                     }
                     username = p[1];
-                    sendMessage("TOKEN " + tm.getTokenString());
-                    System.err.println(username + " logged in or registered");
+                    send("TOKEN " + tm.getTokenString());
                 } else {
-                    sendMessage("INVALID_COMMAND");
+                    send("INVALID_COMMAND");
                     return;
                 }
 
-                // Register active client
+                // register active client
                 clientsLock.writeLock().lock();
                 try {
                     activeClients.put(username, out);
@@ -111,128 +129,193 @@ public class Server {
                     clientsLock.writeLock().unlock();
                 }
 
-                // Check if user was in a room and rejoin them
-                ChatRoom savedRoom = userManager.getChatRoom(username);
-                if (savedRoom != null) {
-                    // Get or create the room on the server side
-                    ChatRoom serverRoom = getOrCreateRoom(savedRoom.getChatRoomName());
-                    // Add user back to the room
-                    serverRoom.addUser(username);
-                    // Update user's room reference to the server room instance
-                    userManager.setRoom(username, serverRoom);
-                    sendMessage("-- you have rejoined the room " + serverRoom.getChatRoomName() + " --");
-                    System.err.println(username + " rejoined " + serverRoom.getChatRoomName() + " after reconnection");
+                // rejoin saved room if any
+                ChatRoom prev = userManager.getChatRoom(username);
+                if (prev != null) {
+                    ChatRoom srvRoom = getOrCreateRoom(prev.getChatRoomName());
+                    srvRoom.addUser(username);
+                    userManager.setRoom(username, srvRoom);
+                    send("-- you have rejoined the room " + srvRoom.getChatRoomName() + " --");
                 }
 
-                // Main loop
+                // --- Main loop ---
                 while ((line = in.readLine()) != null) {
                     if (line.startsWith("/join ")) {
-                        String roomName = line.substring(6).trim();
-                        ChatRoom room = getOrCreateRoom(roomName);
-
-                        // Remove user from previous room if they were in one
-                        ChatRoom previousRoom = userManager.getChatRoom(username);
-                        if (previousRoom != null) {
-                            previousRoom.removeUser(username);
+                        String spec = line.substring(6).trim();
+                        ChatRoom room;
+                        if (spec.startsWith("AI:")) {
+                            String payload = spec.substring(3);
+                            String[] parts = payload.split("\\|", 2);
+                            String rn    = parts[0].trim();
+                            String prmpt = (parts.length > 1 && !parts[1].isEmpty())
+                                    ? parts[1].trim()
+                                    : DEFAULT_AI_PROMPT;
+                            room = getOrCreateAIRoom(rn, prmpt);
+                        } else {
+                            room = getOrCreateRoom(spec);
                         }
-
-                        // Add user to new room
+                        // leave old
+                        ChatRoom old = userManager.getChatRoom(username);
+                        if (old != null) old.removeUser(username);
+                        // join new
                         room.addUser(username);
                         userManager.setRoom(username, room);
-                        sendMessage("-- you have joined the room " + room.getChatRoomName() + " --");
-                        System.err.println(username + " joined " + room.getChatRoomName());
+                        send("-- you have joined the room " + room.getChatRoomName() + " --");
 
                     } else if (line.equals("/leave")) {
                         ChatRoom room = userManager.getChatRoom(username);
                         if (room == null) {
-                            sendMessage("NOT_IN_ROOM");
+                            send("NOT_IN_ROOM");
                         } else {
                             room.removeUser(username);
                             userManager.setRoom(username, null);
-                            sendMessage("-- you have left the room " + room.getChatRoomName() + " --");
-                            System.err.println(username + " left room " + room.getChatRoomName());
+                            send("-- you have left the room " + room.getChatRoomName() + " --");
                         }
 
                     } else if (line.equals("/rooms")) {
                         roomsLock.readLock().lock();
                         try {
                             if (rooms.isEmpty()) {
-                                sendMessage("No rooms available");
-                                sendMessage("use /join [room] to create one :)");
+                                send("No rooms available");
                             } else {
-                                sendMessage("Available rooms: " + String.join(", ", rooms.keySet()));
+                                send("Available rooms: " + String.join(", ", rooms.keySet()));
                             }
                         } finally {
                             roomsLock.readLock().unlock();
                         }
 
                     } else if (line.equals("/help")) {
-                        sendMessage("Commands:");
-                        sendMessage("  /join <room>   — join or create a room");
-                        sendMessage("  /leave         — leave current room");
-                        sendMessage("  /rooms         — list all rooms");
-                        sendMessage("  /quit          — disconnect and delete session");
-                        sendMessage("  /help          — show this message");
+                        send("Commands:");
+                        send("  /join <room>");
+                        send("  /join AI:<name>|<prompt>    (or AI:<name> for default AI)");
+                        send("  /leave");
+                        send("  /rooms");
+                        send("  /quit");
+                        send("  /help");
 
                     } else if (line.equals("/quit")) {
-                        // Remove user from their room when they explicitly quit
-                        ChatRoom currentRoom = userManager.getChatRoom(username);
-                        if (currentRoom != null) {
-                            currentRoom.removeUser(username);
-                        }
+                        ChatRoom room = userManager.getChatRoom(username);
+                        if (room != null) room.removeUser(username);
                         userManager.invalidateToken(username);
-                        sendMessage("Goodbye!");
+                        send("Goodbye!");
                         break;
 
                     } else if (line.startsWith("/")) {
-                        sendMessage("UNKNOWN_COMMAND. Type another command");
+                        send("UNKNOWN_COMMAND");
 
                     } else {
                         ChatRoom room = userManager.getChatRoom(username);
                         if (room == null) {
-                            sendMessage("NOT_IN_ROOM");
-                        } else {
-                            broadcast(room, username + ": " + line);
+                            send("NOT_IN_ROOM");
+                            continue;
+                        }
+                        String tagged = username + ": " + line;
+                        room.addMessage(tagged);
+                        broadcast(room, tagged);
+
+                        if (room.isAI()) {
+                            String aiResp = generateAIReply(room);
+                            String botMsg = "Bot: " + aiResp;
+                            room.addMessage(botMsg);
+                            broadcast(room, botMsg);
                         }
                     }
                 }
-
             } catch (SocketException se) {
                 System.err.println("Socket error for " + username + ": " + se.getMessage());
             } catch (IOException ioe) {
                 System.err.println("I/O error for " + username + ": " + ioe.getMessage());
             } finally {
                 if (username != null) {
-                    // DO NOT remove user from room on disconnect - they should stay for reconnection
-                    // Only remove from active clients list
                     clientsLock.writeLock().lock();
                     try {
                         activeClients.remove(username);
                     } finally {
                         clientsLock.writeLock().unlock();
                     }
-                    System.err.println("Cleaned up active session for " + username + " (room membership preserved)");
                 }
             }
         }
-    }
 
-    private void broadcast(ChatRoom room, String msg) {
-        List<PrintWriter> targets = new ArrayList<>();
-        clientsLock.readLock().lock();
-        try {
-            // Get all users in the room using the ChatRoom method
-            Set<String> roomUsers = room.getUsers();
-            for (var e : activeClients.entrySet()) {
-                if (roomUsers.contains(e.getKey())) {
-                    targets.add(e.getValue());
+        private void broadcast(ChatRoom room, String msg) {
+            List<PrintWriter> targets = new ArrayList<>();
+            clientsLock.readLock().lock();
+            try {
+                for (var e : activeClients.entrySet()) {
+                    if (room.hasUser(e.getKey())) {
+                        targets.add(e.getValue());
+                    }
                 }
+            } finally {
+                clientsLock.readLock().unlock();
             }
-        } finally {
-            clientsLock.readLock().unlock();
+            for (PrintWriter w : targets) {
+                w.println(msg);
+            }
         }
-        for (PrintWriter w : targets) {
-            w.println(msg);
+
+        private String generateAIReply(ChatRoom room) {
+            final String model = "llama3.2:1b";
+
+            // 1) Build the plain-text prompt
+            StringBuilder prompt = new StringBuilder();
+            prompt.append(room.getPrompt()).append("\n\n");
+            for (String msg : room.getHistory()) {
+                prompt.append(msg).append("\n");
+            }
+            prompt.append("Bot: ");
+
+            // 2) Helper to invoke ollama, merge stderr→stdout, send input, and capture all output
+            BiFunction<List<String>, StringBuilder, String> runCommand = (cmd, input) -> {
+                try {
+                    ProcessBuilder pb = new ProcessBuilder(cmd);
+                    pb.redirectErrorStream(true);
+                    Process proc = pb.start();
+
+                    if (input.length() > 0) {
+                        try (OutputStream os = proc.getOutputStream()) {
+                            os.write(input.toString().getBytes());
+                            os.flush();
+                        }
+                    }
+
+                    StringBuilder out = new StringBuilder();
+                    try (BufferedReader br = new BufferedReader(new InputStreamReader(proc.getInputStream()))) {
+                        String line;
+                        while ((line = br.readLine()) != null) {
+                            out.append(line).append("\n");
+                        }
+                    }
+
+                    proc.waitFor();
+                    return out.toString();
+                } catch (Exception e) {
+                    return "(OLLAMA ERROR: " + e.getMessage() + ")";
+                }
+            };
+
+            // 3) Ensure the model is present (harmless if already pulled)
+            String pullOut = runCommand.apply(
+                    List.of("ollama", "pull", model),
+                    new StringBuilder()
+            );
+            System.err.println("[ollama pull] " + pullOut.trim());
+
+            // 4) Run the model with our assembled prompt
+            String runOut = runCommand.apply(
+                    List.of("ollama", "run", model),
+                    prompt
+            );
+
+            // 5) Strip ANSI/control sequences and non-printables (except newline)
+            String clean = runOut
+                    // remove ANSI CSI sequences like ESC[?2026h or ESC[1m
+                    .replaceAll("\\u001B\\[[;?0-9]*[a-zA-Z]", "")
+                    // remove any other control characters except CR+LF
+                    .replaceAll("[^\\x20-\\x7E\\r\\n]", "")
+                    .trim();
+
+            return clean;
         }
     }
 }

@@ -1,36 +1,27 @@
 import javax.net.ssl.*;
 import java.io.*;
-import java.net.SocketException;
 import java.nio.file.*;
 
 public class Client {
     private static String username;
     private static String savedToken = null;
-    // Will become session_<username>.token once username is known
     private static Path sessionFile;
     private static final int MAX_RECONNECT_ATTEMPTS = 5;
     private static final int RECONNECT_DELAY_MS = 2000;
     private static final String SERVER_HOST = "localhost";
     private static final int SERVER_PORT = 9999;
-
     private static volatile boolean done;
     private static volatile boolean quit;
 
     public static void main(String[] args) throws Exception {
         BufferedReader console = new BufferedReader(new InputStreamReader(System.in));
-
-        // 1) Prompt for username up-front
         System.out.print("Username> ");
         username = console.readLine().trim();
-        // 2) Determine per-user token file
         sessionFile = Paths.get("session_" + username + ".token");
-
-        // 3) Load existing token (if any) for that user
         if (Files.exists(sessionFile)) {
             savedToken = new String(Files.readAllBytes(sessionFile)).trim();
         }
 
-        // SSL truststore setup (unchanged)
         File truststore = new File("truststore.jks");
         if (!truststore.exists()) {
             System.err.println("ERROR: truststore.jks not found. Generate it first.");
@@ -40,18 +31,15 @@ public class Client {
         System.setProperty("javax.net.ssl.trustStorePassword", "changeit");
         System.setProperty("javax.net.ssl.trustStoreType", "JKS");
 
-        // Verify server is reachable before proceeding
         if (!serverAvailable()) {
             System.err.printf("ERROR: Cannot connect to server at %s:%d%n", SERVER_HOST, SERVER_PORT);
             System.exit(1);
         }
 
-        // 4) If we didn't load a token, do a one‐time login (supplies both user & pass)
         if (savedToken == null) {
             login(console, username);
         }
 
-        // 5) Main loop: connect, chat, auto-reconnect (exactly as before)
         while (true) {
             try {
                 if (connectAndChat(console)) break;
@@ -90,7 +78,6 @@ public class Client {
         }
     }
 
-    /** Now takes username so it only asks for password. */
     private static void login(BufferedReader console, String user) throws Exception {
         System.out.print("Password> ");
         String pass = console.readLine().trim();
@@ -105,7 +92,6 @@ public class Client {
             String resp = in.readLine();
             if (resp != null && resp.startsWith("TOKEN ")) {
                 savedToken = resp.substring(6).trim();
-                // save to user-specific file
                 Files.write(sessionFile, savedToken.getBytes());
                 System.out.println("Logged in. Token saved to " + sessionFile);
             } else {
@@ -125,7 +111,6 @@ public class Client {
             BufferedReader in = new BufferedReader(new InputStreamReader(sock.getInputStream()));
             PrintWriter out = new PrintWriter(sock.getOutputStream(), true);
 
-            // send token
             out.println("/token " + savedToken);
             String welcome = in.readLine();
             if (welcome == null || welcome.equals("TOKEN_INVALID")) {
@@ -137,7 +122,6 @@ public class Client {
             }
             System.out.println(welcome);
 
-            // reader thread (unchanged)
             Thread reader = new Thread(() -> {
                 try {
                     String line;
@@ -153,7 +137,6 @@ public class Client {
             reader.setDaemon(true);
             reader.start();
 
-            // input loop (unchanged)
             printHelp();
             while (!done) {
                 if (!console.ready()) {
@@ -185,7 +168,7 @@ public class Client {
         }
     }
 
-    private static void configureSocket(SSLSocket sock) throws SocketException {
+    private static void configureSocket(SSLSocket sock) throws IOException {
         sock.setEnabledProtocols(new String[]{"TLSv1.3", "TLSv1.2"});
         sock.setEnabledCipherSuites(new String[]{
                 "TLS_AES_256_GCM_SHA384",
