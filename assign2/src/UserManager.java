@@ -27,8 +27,8 @@ public class UserManager {
     private final Map<String, User> users = new HashMap<>();
     private final ReadWriteLock lock = new ReentrantReadWriteLock();
     private final String STATE_FILE = "user_state.txt";
-    private final long TOKEN_LIFETIME = 60L * 60L * 24L * 7L; // one week
-    private Server server; // Reference to server for room coordination
+    private final long TOKEN_LIFETIME = 60L * 60L * 24L * 3L;
+    private Server server;
 
     public UserManager() {
         loadState();
@@ -46,7 +46,9 @@ public class UserManager {
             var sb = new StringBuilder();
             for (byte b : bs) {
                 String h = Integer.toHexString(0xff & b);
-                if (h.length() == 1) sb.append('0');
+                if (h.length() == 1) {
+                    sb.append('0');
+                }
                 sb.append(h);
             }
             return sb.toString();
@@ -75,8 +77,10 @@ public class UserManager {
                 users.clear();
                 while ((line = r.readLine()) != null) {
                     line = line.trim();
-                    if (line.isEmpty() || line.startsWith("#")) continue;
-                    // format: username:passwordHash:tokenString:expiryEpoch:roomName
+                    if (line.isEmpty() || line.startsWith("#")) {
+                        continue;
+                    }
+                    // format: username:passwordHash:tokenString:expiration:roomName
                     String[] p = line.split(":", 5);
                     if (p.length != 5) {
                         System.err.println("Skipping invalid state line: " + line);
@@ -90,9 +94,7 @@ public class UserManager {
                             user.token = createTokenFromParts(p[2], exp);
                         }
                     }
-                    // room - create a placeholder room that will be resolved when server is available
                     if (!"null".equals(p[4]) && !p[4].isEmpty()) {
-                        // Create a placeholder ChatRoom - this will be replaced with the actual server room when user reconnects
                         user.room = new ChatRoom(p[4]);
                     }
                     users.put(user.username, user);
@@ -108,16 +110,13 @@ public class UserManager {
 
     private TokenManager createTokenFromParts(String tokenString, long expiryEpoch) {
         try {
-            // Use reflection to create TokenManager with specific token and expiry
             Constructor<TokenManager> constructor = TokenManager.class.getDeclaredConstructor(long.class);
-            TokenManager tm = constructor.newInstance(0L); // Create with 0 seconds (will be overridden)
+            TokenManager tm = constructor.newInstance(0L);
 
-            // Override the tokenString field
             Field tokenField = TokenManager.class.getDeclaredField("tokenString");
             tokenField.setAccessible(true);
             tokenField.set(tm, tokenString);
 
-            // Override the expiresAt field
             Field expiresAtField = TokenManager.class.getDeclaredField("expiresAt");
             expiresAtField.setAccessible(true);
             expiresAtField.set(tm, Instant.ofEpochSecond(expiryEpoch));
@@ -163,21 +162,25 @@ public class UserManager {
 
     public TokenManager authenticateOrRegister(String user, String pass) {
         TokenManager tm = authenticate(user, pass);
-        if (tm != null) return tm;
-        if (!registerUser(user, pass)) return null;
+        if (tm != null) {
+            return tm;
+        }
+        if (!registerUser(user, pass)) {
+            return null;
+        }
         return authenticate(user, pass);
     }
 
     public TokenManager authenticate(String user, String pass) {
-        String h = sha256(pass);
+        String hash = sha256(pass);
         lock.writeLock().lock();
         try {
-            User u = users.get(user);
-            if (u != null && u.passwordHash.equals(h)) {
-                if (u.token == null || u.token.isExpired()) {
-                    u.token = new TokenManager(TOKEN_LIFETIME);
+            User currentUser = users.get(user);
+            if (currentUser != null && currentUser.passwordHash.equals(hash)) {
+                if (currentUser.token == null || currentUser.token.isExpired()) {
+                    currentUser.token = new TokenManager(TOKEN_LIFETIME);
                 }
-                return u.token;
+                return currentUser.token;
             }
         } finally {
             lock.writeLock().unlock();
@@ -188,16 +191,17 @@ public class UserManager {
     public void invalidateToken(String user) {
         lock.writeLock().lock();
         try {
-            User u = users.get(user);
-            if (u != null) {
-                u.token = null;
-                // Also clear room when explicitly invalidating token (user quit)
-                if (u.room != null) {
-                    u.room = null;
+            User currentUser = users.get(user);
+            if (currentUser != null) {
+                currentUser.token = null;
+
+                if (currentUser.room != null) {
+                    currentUser.room = null;
                 }
                 saveState();
             }
-        } finally {
+        }
+        finally {
             lock.writeLock().unlock();
         }
     }
@@ -205,11 +209,11 @@ public class UserManager {
     public String validateToken(String tokenStr) {
         lock.readLock().lock();
         try {
-            for (User u : users.values()) {
-                if (u.token != null
-                        && u.token.getTokenString().equals(tokenStr)
-                        && !u.token.isExpired()) {
-                    return u.username;
+            for (User currentUser : users.values()) {
+                if (currentUser.token != null
+                        && currentUser.token.getTokenString().equals(tokenStr)
+                        && !currentUser.token.isExpired()) {
+                    return currentUser.username;
                 }
             }
         } finally {
@@ -221,9 +225,9 @@ public class UserManager {
     public void setRoom(String user, ChatRoom room) {
         lock.writeLock().lock();
         try {
-            User u = users.get(user);
-            if (u != null) {
-                u.room = room;
+            User currentUser = users.get(user);
+            if (currentUser != null) {
+                currentUser.room = room;
                 saveState();
             }
         } finally {
@@ -234,8 +238,8 @@ public class UserManager {
     public ChatRoom getChatRoom(String user) {
         lock.readLock().lock();
         try {
-            User u = users.get(user);
-            return (u == null ? null : u.room);
+            User currentUser = users.get(user);
+            return (currentUser == null ? null : currentUser.room);
         } finally {
             lock.readLock().unlock();
         }
@@ -250,8 +254,8 @@ public class UserManager {
         lock.writeLock().lock();
         try {
             if (users.containsKey(username)) return false;
-            User u = new User(username, hash);
-            users.put(username, u);
+            User currentUser = new User(username, hash);
+            users.put(username, currentUser);
             saveState();
             return true;
         } finally {

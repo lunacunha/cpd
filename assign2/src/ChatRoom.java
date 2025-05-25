@@ -68,7 +68,6 @@ public class ChatRoom {
         }
     }
 
-    // New method to return current user count
     public int getUserCount() {
         lock.readLock().lock();
         try {

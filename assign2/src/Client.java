@@ -27,7 +27,6 @@ public class Client {
             savedToken = new String(Files.readAllBytes(sessionFile)).trim();
         }
 
-        // Validate TLS configuration
         validateTLSConfiguration();
 
         if (!serverAvailable()) {
@@ -94,13 +93,11 @@ public class Client {
             System.exit(1);
         }
 
-        // Validate truststore type
+        // validate truststore type
         String trustStoreType = System.getProperty("javax.net.ssl.trustStoreType", "JKS");
         if (!trustStoreType.equals("JKS") && !trustStoreType.equals("PKCS12")) {
             System.err.println("WARNING: Unusual truststore type: " + trustStoreType);
         }
-
-        //System.out.println("Using truststore: " + trustStore);
     }
 
     private static boolean serverAvailable() {
@@ -181,7 +178,9 @@ public class Client {
                     continue;
                 }
                 String msg = console.readLine();
-                if (msg == null) continue;
+                if (msg == null) {
+                    continue;
+                }
 
                 switch (msg.trim()) {
                     case "/help":

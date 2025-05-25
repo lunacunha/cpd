@@ -14,7 +14,7 @@ import java.util.function.BiFunction;
 public class Server {
     private static final int PORT = 9999;
 
-    // default prompt when user omits one
+    // default prompt
     private static final String DEFAULT_AI_PROMPT =
             "You are a helpful AI assistant. Keep track of the conversation and respond concisely.";
 
@@ -25,13 +25,11 @@ public class Server {
     private final ReadWriteLock clientsLock = new ReentrantReadWriteLock();
 
     public static void main(String[] args) throws Exception {
-        // Validate TLS configuration
         validateTLSConfiguration();
 
         SSLServerSocketFactory ssf = (SSLServerSocketFactory) SSLServerSocketFactory.getDefault();
         SSLServerSocket serverSocket = (SSLServerSocket) ssf.createServerSocket(PORT);
 
-        // Configure supported protocols and cipher suites
         serverSocket.setEnabledProtocols(new String[]{"TLSv1.3","TLSv1.2"});
         serverSocket.setEnabledCipherSuites(new String[]{
                 "TLS_AES_256_GCM_SHA384",
@@ -48,7 +46,7 @@ public class Server {
 
         while (true) {
             SSLSocket sock = (SSLSocket) serverSocket.accept();
-            sock.setNeedClientAuth(false);  // Server-only authentication
+            sock.setNeedClientAuth(false);
             sock.setKeepAlive(true);
             new Thread(srv.new ConnectionHandler(sock)).start();
         }
@@ -82,7 +80,6 @@ public class Server {
             System.exit(1);
         }
 
-        // Validate keystore type
         String keyStoreType = System.getProperty("javax.net.ssl.keyStoreType", "JKS");
         if (!keyStoreType.equals("JKS") && !keyStoreType.equals("PKCS12")) {
             System.err.println("WARNING: Unusual keystore type: " + keyStoreType);
@@ -105,7 +102,6 @@ public class Server {
                 if (existing == null || !existing.isAI()) {
                     return new ChatRoom(rn, prompt);
                 } else {
-                    // already AI room: leave prompt unchanged
                     return existing;
                 }
             });
@@ -137,7 +133,6 @@ public class Server {
                 String line = in.readLine();
                 if (line == null) return;
 
-                // --- Authentication ---
                 if (line.startsWith("/token ")) {
                     username = userManager.validateToken(line.substring(7).trim());
                     if (username != null) {
@@ -178,7 +173,6 @@ public class Server {
                     System.out.println();
                 }
 
-                // --- Main loop ---
                 while ((line = in.readLine()) != null) {
                     if (line.startsWith("/join ")) {
                         String spec = line.substring(6).trim();
@@ -206,7 +200,6 @@ public class Server {
                         sendMessage("-- You have joined the room " + room.getChatRoomName() + " --");
                         System.out.println();
 
-
                     } else if (line.equals("/leave")) {
                         ChatRoom room = userManager.getChatRoom(username);
                         if (room == null) {
@@ -225,7 +218,6 @@ public class Server {
                                 sendMessage("No rooms available");
                             } else {
                                 sendMessage("Available rooms:");
-                                // Iterate over ChatRoom objects so we can get the user count
                                 for (ChatRoom room : rooms.values()) {
                                     sendMessage(String.format("- %s (%d users)",
                                             room.getChatRoomName(),
