@@ -20,12 +20,6 @@ public class Client {
         BufferedReader console = new BufferedReader(new InputStreamReader(System.in));
         System.out.println("=== Welcome :) ===");
         System.out.println();
-        System.out.print("Enter your username: ");
-        username = console.readLine().trim();
-        sessionFile = Paths.get("session_" + username + ".token");
-        if (Files.exists(sessionFile)) {
-            savedToken = new String(Files.readAllBytes(sessionFile)).trim();
-        }
 
         validateTLSConfiguration();
 
@@ -34,8 +28,25 @@ public class Client {
             System.exit(1);
         }
 
-        if (savedToken == null) {
-            login(console, username);
+        // Login loop
+        while (savedToken == null) {
+            System.out.print("Enter your username: ");
+            username = console.readLine().trim();
+            sessionFile = Paths.get("session_" + username + ".token");
+            if (Files.exists(sessionFile)) {
+                savedToken = new String(Files.readAllBytes(sessionFile)).trim();
+                break;
+            }
+
+            if (!login(console, username)) {
+                System.out.println("Would you like to try again? (yes/no): ");
+                String retry = console.readLine().trim().toLowerCase();
+                if (!retry.equals("y") && !retry.equals("yes")) {
+                    System.out.println("Goodbye!");
+                    System.exit(0);
+                }
+                System.out.println();
+            }
         }
 
         while (true) {
@@ -112,7 +123,7 @@ public class Client {
         }
     }
 
-    private static void login(BufferedReader console, String user) throws Exception {
+    private static boolean login(BufferedReader console, String user) throws Exception {
         System.out.print("Enter your password: ");
         String pass = console.readLine().trim();
 
@@ -127,10 +138,11 @@ public class Client {
             if (resp != null && resp.startsWith("TOKEN ")) {
                 savedToken = resp.substring(6).trim();
                 Files.write(sessionFile, savedToken.getBytes());
-                System.out.println("\nLogged in. Token saved to " + sessionFile + "\n");
+                System.out.println("\nLogged in successfully! Token saved to " + sessionFile + "\n");
+                return true;
             } else {
-                System.err.println("Login failed: " + resp);
-                System.exit(1);
+                System.err.println("Login failed: " + (resp != null ? resp : "No response from server"));
+                return false;
             }
         }
     }
@@ -148,11 +160,28 @@ public class Client {
             out.println("/token " + savedToken);
             String welcome = in.readLine();
             if (welcome == null || welcome.equals("TOKEN_INVALID")) {
-                System.err.println("Token invalid. Re-login.");
+                System.err.println("Token invalid. Please login again.");
                 Files.deleteIfExists(sessionFile);
                 savedToken = null;
-                login(console, username);
-                return false;
+
+                // Start login retry loop
+                BufferedReader console2 = new BufferedReader(new InputStreamReader(System.in));
+                while (savedToken == null) {
+                    System.out.print("Enter your username: ");
+                    username = console2.readLine().trim();
+                    sessionFile = Paths.get("session_" + username + ".token");
+
+                    if (!login(console2, username)) {
+                        System.out.println("Would you like to try again? (y/n): ");
+                        String retry = console2.readLine().trim().toLowerCase();
+                        if (!retry.equals("y") && !retry.equals("yes")) {
+                            System.out.println("Goodbye!");
+                            return true; // Exit gracefully
+                        }
+                        System.out.println(); // Add blank line for readability
+                    }
+                }
+                return false; // Retry connection with new token
             }
             System.out.println(welcome);
 
