@@ -169,7 +169,7 @@ public class Server {
                     ChatRoom srvRoom = getOrCreateRoom(prev.getChatRoomName());
                     srvRoom.addUser(username);
                     userManager.setRoom(username, srvRoom);
-                    sendMessage("-- You have rejoined the room " + srvRoom.getChatRoomName() + " --");
+                    sendMessage("-- You have rejoined the room: " + srvRoom.getChatRoomName() + " --");
                     System.out.println();
                 }
 
@@ -197,7 +197,7 @@ public class Server {
                         room.addUser(username);
                         userManager.setRoom(username, room);
                         System.out.println();
-                        sendMessage("-- You have joined the room " + room.getChatRoomName() + " --");
+                        broadcast(room, "-- " + username + " has joined the room: " + room.getChatRoomName() + " --");
                         System.out.println();
 
                     } else if (line.equals("/leave")) {
@@ -209,6 +209,7 @@ public class Server {
                             userManager.setRoom(username, null);
                             System.out.println();
                             sendMessage("-- You have left the room: " + room.getChatRoomName() + " --");
+                            broadcast(room, "-- " + username + " has left the room: " + room.getChatRoomName() + " --");
                         }
 
                     } else if (line.equals("/rooms")) {

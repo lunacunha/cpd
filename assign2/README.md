@@ -103,6 +103,12 @@ java -Djavax.net.ssl.trustStore=truststore.jks \
      -cp out/production/assign2 \
      Client
 ```
+**Expected output:**
+```
+=== Welcome :) ===
+
+Enter your username: 
+```
 
 ## Default User Accounts
 
@@ -201,24 +207,6 @@ In this example, we create a `Thread` object called `thread`, and then pass a la
 
 ## Platform-Specific Instructions
 
-### Windows
-```cmd
-REM Compile
-javac -d out\production\assign2 src\*.java
-
-REM Run Server
-java -Djavax.net.ssl.keyStore=server.jks ^
-     -Djavax.net.ssl.keyStorePassword=serverpass123 ^
-     -cp out\production\assign2 ^
-     Server
-
-REM Run Client (new command prompt)
-java -Djavax.net.ssl.trustStore=truststore.jks ^
-     -Djavax.net.ssl.trustStorePassword=trustpass123 ^
-     -cp out\production\assign2 ^
-     Client
-```
-
 ### macOS/Linux with Specific JDK
 ```bash
 # Find Java installation
@@ -226,7 +214,7 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 21)  # or -v 23
 
 # Run with specific JDK
 $JAVA_HOME/bin/java -Djavax.net.ssl.keyStore=server.jks \
-                    -Djavax.net.ssl.keyStorePassword=serverpass123 \
+                    -Djavax.net.ssl.keyStorePassword=[keystore-password] \
                     -cp out/production/assign2 \
                     Server
 ```
@@ -257,15 +245,14 @@ $JAVA_HOME/bin/java -Djavax.net.ssl.keyStore=server.jks \
 ### File Locations
 - **User data**: `user_state.txt` (auto-generated)
 - **Session tokens**: `session_<username>.token` (auto-generated)
-- **Server certificate**: `server.jks` (you create this)
-- **Client truststore**: `truststore.jks` (you create this)
+- **Server certificate**: `server.jks` (needs to be created)
+- **Client truststore**: `truststore.jks` (needs to be created)
 
 ## Security Notes
 
 - All communication is encrypted using TLS 1.2/1.3
 - Passwords are hashed using SHA-256
 - Session tokens expire after 3 days
-- Self-signed certificates are used (not suitable for production)
 
 ## Development
 

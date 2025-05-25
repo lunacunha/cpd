@@ -176,12 +176,12 @@ public class Client {
                         String retry = console2.readLine().trim().toLowerCase();
                         if (!retry.equals("y") && !retry.equals("yes")) {
                             System.out.println("Goodbye!");
-                            return true; // Exit gracefully
+                            return true;
                         }
-                        System.out.println(); // Add blank line for readability
+                        System.out.println();
                     }
                 }
-                return false; // Retry connection with new token
+                return false;
             }
             System.out.println(welcome);
 
@@ -245,12 +245,13 @@ public class Client {
     private static void printHelp() {
         System.out.println();
         System.out.println("Commands:");
-        System.out.println("  /join <room>      — join or create a room");
-        System.out.println("  /join AI:<room>   — join or create a room with chat bot");
-        System.out.println("  /leave            — leave current room");
-        System.out.println("  /rooms            — list all rooms");
-        System.out.println("  /quit             — exit client");
-        System.out.println("  /help             — show this list");
+        System.out.println("  /join <room>              — join or create a room");
+        System.out.println("  /join AI:<room>           — join or create a room with chat bot (default prompt)");
+        System.out.println("  /join AI:<name>|<prompt>  — join or create a room with chat bot");
+        System.out.println("  /leave                    — leave current room");
+        System.out.println("  /rooms                    — list all rooms");
+        System.out.println("  /quit                     — exit client");
+        System.out.println("  /help                     — show this list");
         System.out.println();
     }
 }
