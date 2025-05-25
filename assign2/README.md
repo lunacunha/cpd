@@ -1,162 +1,292 @@
-# README
+# TLS Chat System
 
-This README provides instructions on how to compile and run the **Server** and **Client** for the TLS-based Java chat system.
+A secure multi-user chat application built with Java, featuring TLS encryption, persistent user sessions, and integrated AI chatbot support using Ollama.
 
----
+## Features
 
-## 1. Prerequisites
+- **Secure Communication**: TLS 1.2/1.3 encryption with custom certificates
+- **Multi-user Chat Rooms**: Create and join different chat rooms
+- **AI Integration**: Chat with AI bots powered by Ollama (llama3.2:1b model)
+- **Persistent Sessions**: Automatic token-based session management
+- **User Authentication**: Registration and login system with password hashing
+- **Room Persistence**: Automatically rejoin your last room on reconnection
 
-* **Java JDK 23** (or higher) installed.
-* `keytool` (included with the JDK).
-* External JSON library: `json-20250517.jar` located in `src/lib/`.
-* Output directory for compiled classes: `out/production/assign2`.
+## Prerequisites
 
-> **Note:** If you need to run on an older Java runtime (e.g., Java 21), recompile the code with `--release 21` or set `sourceCompatibility` and `targetCompatibility` in your build tool accordingly.
+### Required Software
+- **Java JDK 21 or higher** (tested with JDK 23)
+- **Ollama** (for AI chat functionality) - [Download here](https://ollama.com/)
 
----
+### Verify Java Installation
+```bash
+java --version
+javac --version
+```
 
-## 2. Generate the Keystore (Server)
-
-1. In the project root, create the keystore file `server.jks`:
-
+### Setup Ollama (for AI features)
+1. Install Ollama from [ollama.com](https://ollama.com/)
+2. Pull the required model:
    ```bash
-   keytool -genkeypair \
-     -alias server \
-     -keyalg RSA \
-     -keysize 2048 \
-     -validity 365 \
-     -keystore server.jks \
-     -storepass <keystore-password> \
-     -keypass <keystore-password> \
-     -dname "CN=localhost, OU=MyOrg, O=MyCompany, L=Lisbon, ST=Lisbon, C=PT"
+   ollama pull llama3.2:1b
    ```
 
-2. Confirm that `server.jks` exists in the project directory.
+## Quick Start Guide
 
----
-
-## 3. Generate the Truststore (Client)
-
-1. Export the server certificate from `server.jks`:
-
-   ```bash
-   keytool -exportcert \
-     -alias server \
-     -keystore server.jks \
-     -storepass <keystore-password> \
-     -file server.crt
-   ```
-
-2. Create the client truststore `truststore.jks` by importing the server certificate:
-
-   ```bash
-   keytool -importcert \
-     -alias server \
-     -file server.crt \
-     -keystore truststore.jks \
-     -storepass <truststore-password> \
-     -noprompt
-   ```
-
-3. Confirm that `truststore.jks` exists in the project directory.
-
----
-
-## 4. Compile the Code
-
-From the project root, run:
-
+### 1. Download and Setup
 ```bash
-javac --release 23 \
-  -d out/production/assign2 \
-  src/**/*.java
+# Clone or download the project
+cd your-project-directory
+
+# Create output directory
+mkdir -p out/production/assign2
 ```
 
-> For compatibility with Java 21 or lower, replace `--release 23` with `--release 21`.
+### 2. Generate TLS Certificates
 
----
-
-## 5. Run the Server
-
-### On macOS/Linux with JDK 23:
-
+**Create Server Keystore:**
 ```bash
-export JAVA_HOME=$(/usr/libexec/java_home -v 23)
-$JAVA_HOME/bin/java \
-  -Djavax.net.ssl.keyStore=server.jks \
-  -Djavax.net.ssl.keyStorePassword=<keystore-password> \
-  -classpath out/production/assign2:src/lib/json-20250517.jar \
-  Server
+keytool -genkeypair \
+  -alias server \
+  -keyalg RSA \
+  -keysize 2048 \
+  -validity 365 \
+  -keystore server.jks \
+  -storepass [keystore-password] \
+  -keypass [keystore-password] \
+  -dname "CN=localhost, OU=ChatApp, O=MyCompany, L=City, ST=State, C=US"
 ```
 
-### Or invoke the JDK directly:
-
+**Create Client Truststore:**
 ```bash
-/Users/luna/Library/Java/JavaVirtualMachines/openjdk-23.0.2/Contents/Home/bin/java \
-  -Djavax.net.ssl.keyStore=server.jks \
-  -Djavax.net.ssl.keyStorePassword=<keystore-password> \
-  -classpath out/production/assign2:src/lib/json-20250517.jar \
-  Server
+# Export server certificate
+keytool -exportcert \
+  -alias server \
+  -keystore server.jks \
+  -storepass [keystore-password] \
+  -file server.crt
+
+# Create truststore
+keytool -importcert \
+  -alias server \
+  -file server.crt \
+  -keystore truststore.jks \
+  -storepass [truststore-password] \
+  -noprompt
 ```
 
-### On Windows (adjust paths as needed):
-
-```bat
-set JAVA_HOME=C:\Path\to\jdk-23
-"%JAVA_HOME%\bin\java" ^
-  -Djavax.net.ssl.keyStore=server.jks ^
-  -Djavax.net.ssl.keyStorePassword=<keystore-password> ^
-  -classpath out\production\assign2;src\lib\json-20250517.jar ^
-  Server
-```
-
----
-
-## 6. Run the Client
-
-### On macOS/Linux with JDK 23:
-
+### 3. Compile the Application
 ```bash
-export JAVA_HOME=$(/usr/libexec/java_home -v 23)
-$JAVA_HOME/bin/java \
-  -Djavax.net.ssl.trustStore=truststore.jks \
-  -Djavax.net.ssl.trustStorePassword=<truststore-password> \
-  -classpath out/production/assign2:src/lib/json-20250517.jar \
-  Client
+javac -d out/production/assign2 src/*.java
 ```
 
-### Or invoke the JDK directly:
-
+### 4. Start the Server
 ```bash
-/Users/luna/Library/Java/JavaVirtualMachines/openjdk-23.0.2/Contents/Home/bin/java \
-  -Djavax.net.ssl.trustStore=truststore.jks \
-  -Djavax.net.ssl.trustStorePassword=<truststore-password> \
-  -classpath out/production/assign2:src/lib/json-20250517.jar \
-  Client
+java -Djavax.net.ssl.keyStore=server.jks \
+     -Djavax.net.ssl.keyStorePassword=[keystore-password] \
+     -cp out/production/assign2 \
+     Server
 ```
 
-### On Windows:
-
-```bat
-set JAVA_HOME=C:\Path\to\jdk-23
-"%JAVA_HOME%\bin\java" ^
-  -Djavax.net.ssl.trustStore=truststore.jks ^
-  -Djavax.net.ssl.trustStorePassword=<truststore-password> ^
-  -classpath out\production\assign2;src\lib\json-20250517.jar ^
-  Client
+**Expected output:**
+```
+TLS Server listening on port 9999
+Using keystore: server.jks
+Initialized user_state.txt with default users
+Loaded 2 users from user_state.txt
 ```
 
----
+### 5. Connect with Client
+Open a new terminal and run:
+```bash
+java -Djavax.net.ssl.trustStore=truststore.jks \
+     -Djavax.net.ssl.trustStorePassword=[truststore-password] \
+     -cp out/production/assign2 \
+     Client
+```
 
-## 7. Useful Client Commands
+## Default User Accounts
 
-* `/join <room>`: Join or create a chat room.
-* `/join AI:<name>|<prompt>`: Join or create a room with an AI bot.
-* `/leave`: Leave the current room.
-* `/rooms`: List all available rooms.
-* `/quit`: Exit the client.
-* `/help`: Show this help message.
+The system comes with two pre-configured accounts:
 
----
+| Username | Password  | Description |
+|----------|-----------|-------------|
+| `admin`  | `admin123` | Administrator account |
+| `guest`  | `guest123` | Guest account |
 
-*Enjoy secure TLS chat with multi-user support and integrated AI!*
+*New users can register automatically by providing new credentials during login.*
+
+## Client Commands
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `/join <room>` | Join or create a regular chat room | `/join general` |
+| `/join AI:<name>` | Join/create AI room with default prompt | `/join AI:assistant` |
+| `/join AI:<name>\|<prompt>` | Join/create AI room with custom prompt | `/join AI:helper\|You are a coding assistant` |
+| `/leave` | Leave current room | `/leave` |
+| `/rooms` | List all available rooms | `/rooms` |
+| `/help` | Show command help | `/help` |
+| `/quit` | Exit client and delete session | `/quit` |
+
+## Usage Examples
+
+### Basic Chat
+```
+=== Welcome :) ===
+
+Enter your username: user
+Enter your password: pass
+
+Logged in successfully! Token saved to session_user.token
+
+Resumed session :)
+
+Commands:
+  /join <room>      — join or create a room
+  /join AI:<room>   — join or create a room with chat bot
+  /leave            — leave current room
+  /rooms            — list all rooms
+  /quit             — exit client
+  /help             — show this list
+  
+> /rooms
+Available rooms:
+- cozinha (2 users)
+
+/join cozinha
+-- You have joined the room cozinha --
+> hi!
+user: hi!
+user2: hi! how are you?
+```
+
+### AI Chat
+```
+> /join AI:chat_with_bot
+-- You have joined the room chat_with_bot --
+> hi!
+lu: hi!
+Bot: How can I assist you today?
+> how is the weather in Porto today?
+lu: how is the weather in Porto today?
+Bot: The weather in Porto, Portugal is currently overcast with light rain showers, with temperatures around 14C (57F).
+```
+
+
+### Custom AI Prompt
+```
+> /join AI:coder|You are a helpful coding assistant specialized in Java
+-- You have joined the room coder --
+> How do I create a thread in Java?
+user: How do I create a thread in Java?
+Bot: To create a thread in Java, you can use the `Thread` class. Here's an example of how to do it:
+
+```java
+public class ThreadExample {
+    public static void main(String[] args) {
+        // Create a new Thread object
+        Thread thread = new Thread(User::doSomething);
+
+        // Start the thread
+        thread.start();
+    }
+
+    private static void doSomething() {
+        System.out.println("Doing something...");
+    }
+}
+
+In this example, we create a `Thread` object called `thread`, and then pass a lambda expression (`User::doSomething`) to its constructor. The lambda expression is a reference to a method that will be executed when the thread is started.
+
+```
+
+## Platform-Specific Instructions
+
+### Windows
+```cmd
+REM Compile
+javac -d out\production\assign2 src\*.java
+
+REM Run Server
+java -Djavax.net.ssl.keyStore=server.jks ^
+     -Djavax.net.ssl.keyStorePassword=serverpass123 ^
+     -cp out\production\assign2 ^
+     Server
+
+REM Run Client (new command prompt)
+java -Djavax.net.ssl.trustStore=truststore.jks ^
+     -Djavax.net.ssl.trustStorePassword=trustpass123 ^
+     -cp out\production\assign2 ^
+     Client
+```
+
+### macOS/Linux with Specific JDK
+```bash
+# Find Java installation
+export JAVA_HOME=$(/usr/libexec/java_home -v 21)  # or -v 23
+
+# Run with specific JDK
+$JAVA_HOME/bin/java -Djavax.net.ssl.keyStore=server.jks \
+                    -Djavax.net.ssl.keyStorePassword=serverpass123 \
+                    -cp out/production/assign2 \
+                    Server
+```
+
+## Troubleshooting
+
+### Common Issues
+
+**"ERROR: Cannot connect to server"**
+- Ensure the server is running first
+- Check that port 9999 is not blocked by firewall
+- Verify TLS certificates are generated correctly
+
+**"TOKEN_INVALID" Error**
+- Delete session files: `rm session_*.token`
+- Log in again with username/password
+
+**"OLLAMA ERROR" in AI Responses**
+- Install Ollama: [ollama.com](https://ollama.com/)
+- Pull the model: `ollama pull llama3.2:1b`
+- Ensure Ollama service is running
+
+**TLS Certificate Errors**
+- Regenerate certificates with matching passwords
+- Ensure `server.jks` and `truststore.jks` exist in project directory
+- Check certificate validity: `keytool -list -keystore server.jks`
+
+### File Locations
+- **User data**: `user_state.txt` (auto-generated)
+- **Session tokens**: `session_<username>.token` (auto-generated)
+- **Server certificate**: `server.jks` (you create this)
+- **Client truststore**: `truststore.jks` (you create this)
+
+## Security Notes
+
+- All communication is encrypted using TLS 1.2/1.3
+- Passwords are hashed using SHA-256
+- Session tokens expire after 3 days
+- Self-signed certificates are used (not suitable for production)
+
+## Development
+
+### Project Structure
+```
+├── src/
+│   ├── Server.java          # Main server application
+│   ├── Client.java          # Client application
+│   ├── ChatRoom.java        # Chat room management
+│   ├── UserManager.java     # User authentication & persistence
+│   └── TokenManager.java    # Session token handling
+├── server.jks              # Server TLS certificate
+├── truststore.jks          # Client truststore
+└── user_state.txt          # User data (auto-generated)
+```
+
+### Key Features Implementation
+- **Thread-safe operations**: Uses `ReadWriteLock` for concurrent access
+- **Automatic reconnection**: Client automatically reconnects on connection loss
+- **Session persistence**: Users rejoin their last room automatically
+- **AI Integration**: Uses local Ollama installation for AI responses
+
+
+
