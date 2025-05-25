@@ -10,6 +10,45 @@ A secure multi-user chat application built with Java, featuring TLS encryption, 
 - **Persistent Sessions**: Automatic token-based session management
 - **User Authentication**: Registration and login system with password hashing
 - **Room Persistence**: Automatically rejoin your last room on reconnection
+- **High Concurrency**: Virtual threads with custom thread-safe implementations
+
+## Concurrency Design
+
+- **Virtual Threads**: All client connections are handled by Java 21+ virtual threads for maximum scalability and efficiency
+- **Custom Thread Safety**: Uses java.util.concurrent.locks.ReadWriteLock 
+- **Lock Strategy**: Separate read/write locks for rooms, users, and active clients to minimize contention
+- **Race Condition Prevention**: Proper synchronization for all shared data structures without deadlocks
+
+## Thread-Safe Components
+
+- **ChatRoom**: Protected by ReadWriteLock for user management 
+- **UserManager**: Thread-safe user authentication and state management
+- **Server**: Concurrent client handling with protected active client registry
+- **Message Broadcasting**: Lock-protected operations for real-time message delivery
+
+## Fault Tolerance
+
+- **Automatic Reconnection**: Client reconnects up to 5 times with 2-second delays on connection failure
+- **Session Persistence**: Server maintains complete user state across disconnections
+- **Room Persistence**: Users automatically rejoin their last room after reconnection 
+- **Graceful Error Handling**: Handles network failures, socket errors, and server unavailability
+- **State Recovery**: Both client and server preserve session state during temporary disconnections
+- **Connection Validation**: Server validates connection health and manages client lifecycle
+
+### Reconnection Process
+
+1. Client detects connection loss
+2. Automatic reconnection attempts (up to 5 times)
+3. Token-based re-authentication
+4. Automatic room rejoining
+
+## Security Implementation
+
+- **TLS 1.2/1.3**: Enforced cipher suites
+- **Certificate Validation**: Custom truststore setup 
+- **Password Security**: SHA-256 hashing with proper encoding
+- **Token Management**: 3-day token lifetime with secure validation
+- **Session Security**: Tokens replace credentials after initial authentication
 
 ## Prerequisites
 
@@ -242,38 +281,40 @@ $JAVA_HOME/bin/java -Djavax.net.ssl.keyStore=server.jks \
 - Ensure `server.jks` and `truststore.jks` exist in project directory
 - Check certificate validity: `keytool -list -keystore server.jks`
 
+
+## Development
+
 ### File Locations
+
 - **User data**: `user_state.txt` (auto-generated)
 - **Session tokens**: `session_<username>.token` (auto-generated)
 - **Server certificate**: `server.jks` (needs to be created)
 - **Client truststore**: `truststore.jks` (needs to be created)
+- **Compiled classes**: `out/production/assign2/` (generated during compilation)
 
-## Security Notes
 
-- All communication is encrypted using TLS 1.2/1.3
-- Passwords are hashed using SHA-256
-- Session tokens expire after 3 days
-
-## Development
 
 ### Project Structure
 ```
 ├── src/
-│   ├── Server.java          # Main server application
-│   ├── Client.java          # Client application
-│   ├── ChatRoom.java        # Chat room management
-│   ├── UserManager.java     # User authentication & persistence
-│   └── TokenManager.java    # Session token handling
-├── server.jks              # Server TLS certificate
-├── truststore.jks          # Client truststore
-└── user_state.txt          # User data (auto-generated)
+│   ├── Server.java            # Main server application
+│   ├── Client.java            # Client application
+│   ├── ChatRoom.java          # Chat room management
+│   ├── UserManager.java       # User authentication & persistence
+│   └── TokenManager.java      # Session token handling
+├── server.jks                 # Server TLS certificate
+├── truststore.jks             # Client truststore
+├── session_<username>.token   # Client truststore
+└── user_state.txt             # User data
 ```
 
 ### Key Features Implementation
+
+- **Virtual Threads**: Lightweight concurrency for handling multiple clients
 - **Thread-safe operations**: Uses `ReadWriteLock` for concurrent access
-- **Automatic reconnection**: Client automatically reconnects on connection loss
-- **Session persistence**: Users rejoin their last room automatically
-- **AI Integration**: Uses local Ollama installation for AI responses
+- **Token-based Authentication**: Secure session management with expiration
+- **State persistence**: File-based user and session management
+- **Automatic Recovery**: Comprehensive fault tolerance mechanisms
 
 
-
+---
