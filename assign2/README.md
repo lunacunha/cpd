@@ -51,9 +51,12 @@ A secure multi-user chat application built with Java, featuring TLS encryption, 
 - **Session Security**: Tokens replace credentials after initial authentication
 
 ### Setup Ollama (for AI features)
+1. Install Ollama from [ollama.com](https://ollama.com/)
+2. In your terminal:
 ```bash
 ollama run llama3.2:1b
 ```
+
 
 ### 1. Generate TLS Certificates
 
