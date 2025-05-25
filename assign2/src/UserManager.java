@@ -117,7 +117,7 @@ public class UserManager {
             tokenField.setAccessible(true);
             tokenField.set(tm, tokenString);
 
-            Field expiresAtField = TokenManager.class.getDeclaredField("expiresAt");
+            Field expiresAtField = TokenManager.class.getDeclaredField("expirationTime");
             expiresAtField.setAccessible(true);
             expiresAtField.set(tm, Instant.ofEpochSecond(expiryEpoch));
 
@@ -136,7 +136,7 @@ public class UserManager {
                 long expSec = 0;
                 if (user.token != null) {
                     try {
-                        Field expiresAtField = TokenManager.class.getDeclaredField("expiresAt");
+                        Field expiresAtField = TokenManager.class.getDeclaredField("expirationTime");
                         expiresAtField.setAccessible(true);
                         Instant expiresAt = (Instant) expiresAtField.get(user.token);
                         expSec = expiresAt.getEpochSecond();
