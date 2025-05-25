@@ -48,7 +48,7 @@ public class Server {
             SSLSocket sock = (SSLSocket) serverSocket.accept();
             sock.setNeedClientAuth(false);
             sock.setKeepAlive(true);
-            new Thread(srv.new ConnectionHandler(sock)).start();
+            Thread.startVirtualThread(srv.new ConnectionHandler(sock));
         }
     }
 

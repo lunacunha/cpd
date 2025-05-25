@@ -185,7 +185,7 @@ public class Client {
             }
             System.out.println(welcome);
 
-            Thread reader = new Thread(() -> {
+            Thread reader = Thread.startVirtualThread(() -> {
                 try {
                     String line;
                     while ((line = in.readLine()) != null) {
@@ -197,8 +197,6 @@ public class Client {
                     done = true;
                 }
             });
-            reader.setDaemon(true);
-            reader.start();
 
             printHelp();
             while (!done) {
