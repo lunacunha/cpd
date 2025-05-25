@@ -50,37 +50,12 @@ A secure multi-user chat application built with Java, featuring TLS encryption, 
 - **Token Management**: 3-day token lifetime with secure validation
 - **Session Security**: Tokens replace credentials after initial authentication
 
-## Prerequisites
-
-### Required Software
-- **Java JDK 21 or higher** (tested with JDK 23)
-- **Ollama** (for AI chat functionality) - [Download here](https://ollama.com/)
-
-### Verify Java Installation
-```bash
-java --version
-javac --version
-```
-
 ### Setup Ollama (for AI features)
-1. Install Ollama from [ollama.com](https://ollama.com/)
-2. Pull the required model:
-   ```bash
-   ollama pull llama3.2:1b
-   ```
-
-## Quick Start Guide
-
-### 1. Download and Setup
 ```bash
-# Clone or download the project
-cd your-project-directory
-
-# Create output directory
-mkdir -p out/production/assign2
+ollama run llama3.2:1b
 ```
 
-### 2. Generate TLS Certificates
+### 1. Generate TLS Certificates
 
 **Create Server Keystore:**
 ```bash
@@ -113,12 +88,12 @@ keytool -importcert \
   -noprompt
 ```
 
-### 3. Compile the Application
+### 2. Compile the Application
 ```bash
 javac -d out/production/assign2 src/*.java
 ```
 
-### 4. Start the Server
+### 3. Start the Server
 ```bash
 java -Djavax.net.ssl.keyStore=server.jks \
      -Djavax.net.ssl.keyStorePassword=[keystore-password] \
@@ -134,7 +109,7 @@ Initialized user_state.txt with default users
 Loaded 2 users from user_state.txt
 ```
 
-### 5. Connect with Client
+### 4. Connect with Client
 Open a new terminal and run:
 ```bash
 java -Djavax.net.ssl.trustStore=truststore.jks \
@@ -186,19 +161,20 @@ Logged in successfully! Token saved to session_user.token
 Resumed session :)
 
 Commands:
-  /join <room>      — join or create a room
-  /join AI:<room>   — join or create a room with chat bot
-  /leave            — leave current room
-  /rooms            — list all rooms
-  /quit             — exit client
-  /help             — show this list
+  /join <room>              — join or create a room
+  /join AI:<room>           — join or create a room with chat bot (default prompt)
+  /join AI:<name>|<prompt>  — join or create a room with chat bot
+  /leave                    — leave current room
+  /rooms                    — list all rooms
+  /quit                     — exit client
+  /help                     — show this list
   
 > /rooms
 Available rooms:
-- cozinha (2 users)
+- kitchen (2 users)
 
-/join cozinha
--- You have joined the room cozinha --
+/join kitchen
+-- user has joined the room: kitchen --
 > hi!
 user: hi!
 user2: hi! how are you?
@@ -207,12 +183,12 @@ user2: hi! how are you?
 ### AI Chat
 ```
 > /join AI:chat_with_bot
--- You have joined the room chat_with_bot --
+-- user has joined the room: chat_with_bot --
 > hi!
-lu: hi!
+user: hi!
 Bot: How can I assist you today?
 > how is the weather in Porto today?
-lu: how is the weather in Porto today?
+user: how is the weather in Porto today?
 Bot: The weather in Porto, Portugal is currently overcast with light rain showers, with temperatures around 14C (57F).
 ```
 
@@ -220,7 +196,7 @@ Bot: The weather in Porto, Portugal is currently overcast with light rain shower
 ### Custom AI Prompt
 ```
 > /join AI:coder|You are a helpful coding assistant specialized in Java
--- You have joined the room coder --
+-- user has joined the room: coder --
 > How do I create a thread in Java?
 user: How do I create a thread in Java?
 Bot: To create a thread in Java, you can use the `Thread` class. Here's an example of how to do it:
@@ -243,44 +219,6 @@ public class ThreadExample {
 In this example, we create a `Thread` object called `thread`, and then pass a lambda expression (`User::doSomething`) to its constructor. The lambda expression is a reference to a method that will be executed when the thread is started.
 
 ```
-
-## Platform-Specific Instructions
-
-### macOS/Linux with Specific JDK
-```bash
-# Find Java installation
-export JAVA_HOME=$(/usr/libexec/java_home -v 21)  # or -v 23
-
-# Run with specific JDK
-$JAVA_HOME/bin/java -Djavax.net.ssl.keyStore=server.jks \
-                    -Djavax.net.ssl.keyStorePassword=[keystore-password] \
-                    -cp out/production/assign2 \
-                    Server
-```
-
-## Troubleshooting
-
-### Common Issues
-
-**"ERROR: Cannot connect to server"**
-- Ensure the server is running first
-- Check that port 9999 is not blocked by firewall
-- Verify TLS certificates are generated correctly
-
-**"TOKEN_INVALID" Error**
-- Delete session files: `rm session_*.token`
-- Log in again with username/password
-
-**"OLLAMA ERROR" in AI Responses**
-- Install Ollama: [ollama.com](https://ollama.com/)
-- Pull the model: `ollama pull llama3.2:1b`
-- Ensure Ollama service is running
-
-**TLS Certificate Errors**
-- Regenerate certificates with matching passwords
-- Ensure `server.jks` and `truststore.jks` exist in project directory
-- Check certificate validity: `keytool -list -keystore server.jks`
-
 
 ## Development
 
